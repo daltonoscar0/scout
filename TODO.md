@@ -65,24 +65,27 @@ that says BLOCKED is blocked by the data, not by effort.
 
 ## Must do before training
 
-- **Calibrate the action vocabulary against real events.** `vocab.ACTION_TYPES`
-  is currently derived a priori from the StatsBomb spec and yields 47 action
-  rows; an independent count of realized (type, outcome) combinations suggested
-  closer to 105. The collapse of e.g. Duel's four outcomes into success/fail may
-  be discarding signal. The tokenizer must count and report every pair it cannot
-  map, and a one-competition pass will settle it. Changing the vocabulary after
-  training invalidates every checkpoint and embedding, so settle it first.
+- **DONE -- vocabulary calibrated against real events.** The first cut keyed on
+  raw StatsBomb type names; sportio snake_cases everything, so every lookup would
+  have missed and the corpus would have been nothing but fallback tokens. Rebuilt
+  against a survey of four Euro 2024 matches: 32 event types, 32 distinct outcome
+  strings, `counterpress` inside `extra` rather than a column. Every (type,
+  outcome class) pair now gets a row rather than only the pairs judged reachable
+  in advance -- 173 action rows, 347 total. Tokenizing 14,588 real events maps
+  100% with no unmodelled types and no unmapped outcomes.
 
-- **Measure the 2+-competition population exactly.** The 33/194 figures above are
-  from a 32% sample. A full pass over all 4,235 lineup files costs ~20 MB gzipped
-  and about 105 minutes and converts the extrapolation into a measurement. If the
-  corpus-wide club-to-international population at >=270 min/side comes in under
-  300, the projection module is declared hollow before any model code is written.
+- **DONE -- LM timing measured on MPS, comfortably inside an overnight window.**
+  Config S is 6,553,947 parameters and config M is 14,549,339, both under the
+  spec's 20M cap. At batch 96: 2,734 ms/step, 35 sequences/s. That is 13.3
+  min/epoch over the full 7.1M-event corpus, so 30 epochs is about 6.6 hours.
+  Still to do: one run with `PYTORCH_ENABLE_MPS_FALLBACK=0` to prove no operator
+  silently falls back to CPU, which would be a ~10x regression.
 
-- **Time-box the LM on MPS before committing to an overnight run.** 200 steps of
-  the S config on random batches with `PYTORCH_ENABLE_MPS_FALLBACK=0`. If it
-  exceeds 12 min/epoch, drop to d=192/6 layers or halve the corpus. A single op
-  falling back to CPU is a 10x regression and is silent by default.
+- **Measure the 2+-competition population exactly.** The figures above come from
+  a partial sample. A full pass over all 3,961 lineup files costs ~20 MB gzipped
+  and about 33 minutes at 2 req/s. If the corpus-wide club-to-international
+  population at >=270 min/side comes in under 300, the projection module is
+  declared hollow before any model code is written.
 
 ## Environment
 
