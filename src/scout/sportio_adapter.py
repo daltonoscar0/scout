@@ -24,6 +24,10 @@ Two things sportio does NOT yet provide, which scout therefore builds itself:
 
 from __future__ import annotations
 
+import inspect
+import json
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -38,6 +42,13 @@ _REQUIRED = (
     "EVENT_COLUMNS",
     "extra_field",
 )
+
+# sportio's loader accepts `events_file=` to parse a local file instead of
+# downloading. scout depends on that keyword existing, because it is what keeps
+# sportio's uncompressed cache out of the picture entirely -- routing 3,961
+# matches through the downloader would write about 12 GiB, where scout's own
+# gzip cache holds the same corpus in 1.14 GiB.
+_REQUIRED_KWARGS = ("events_file", "match", "competition")
 
 
 class SportioApiDrift(RuntimeError):
@@ -96,3 +107,50 @@ def extra_field(events: pd.DataFrame, key: str) -> pd.Series:
 def validate_events(events: pd.DataFrame) -> None:
     """Raise if a frame is not schema-conformant. Cheap insurance at stage boundaries."""
     _sportio().validate_events(events)
+
+
+def load_events_from_payload(
+    payload: object,
+    *,
+    match_id: int,
+    competition: str | None = None,
+    season: str | None = None,
+) -> pd.DataFrame:
+    """Normalise one match's raw events JSON without letting sportio fetch anything.
+
+    scout keeps its own gzip-at-rest cache, so the bytes are already in hand.
+    sportio's loader only reads a *path*, so the payload is written to a
+    temporary file and handed over; the temp file is removed immediately.
+
+    360 frames are deliberately not attached. The tokenizer excludes off-ball
+    freeze-frame players entirely -- they are anonymous, carrying only
+    {teammate, actor, keeper, location} with no player id -- so fetching them
+    would cost about 4 GiB to model nothing.
+    """
+    sportio = _sportio()
+    signature = inspect.signature(sportio.load_events)
+    # `load_events(source, **kwargs)` forwards to the per-source loader, so the
+    # keywords are not visible on the public signature. Only check when they are.
+    if signature.parameters and "kwargs" not in signature.parameters:
+        missing = [name for name in _REQUIRED_KWARGS if name not in signature.parameters]
+        if missing:
+            raise SportioApiDrift(
+                "sportio.load_events no longer accepts: "
+                + ", ".join(missing)
+                + ". scout relies on events_file= to avoid sportio's uncompressed cache."
+            )
+
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
+        json.dump(payload, handle)
+        path = handle.name
+    try:
+        return sportio.load_events(
+            "statsbomb",
+            events_file=path,
+            match=match_id,
+            competition=competition,
+            season=season,
+            three_sixty=False,
+        )
+    finally:
+        Path(path).unlink(missing_ok=True)
