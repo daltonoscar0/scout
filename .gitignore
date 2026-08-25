@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Raw and derived data are never committed. Everything here is refetchable
+# or rebuildable from `scout build`.
+data/raw/
+data/derived/
+models/
+
+# Transfermarkt data is fetched at build time behind an explicit opt-in flag
+# and is deliberately never redistributed from this repo. See docs/licensing.md.
+data/transfermarkt/
+
+# The demo bundle is produced by `scout demo`, not tracked.
+data/demo/
+*.xlsx
+!tests/fixtures/*.xlsx
