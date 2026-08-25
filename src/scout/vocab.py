@@ -188,7 +188,9 @@ def delta_index(dx: float | None, dy: float | None) -> int:
     # atan2 gives (-pi, pi]; rotate by half a sector so that sector 0 is
     # centred on "straight forward" rather than straddling the boundary.
     angle = math.atan2(dy, dx)
-    sector = int(((angle + math.pi / DELTA_SECTORS) % (2 * math.pi)) / (2 * math.pi) * DELTA_SECTORS)
+    sector = int(
+        ((angle + math.pi / DELTA_SECTORS) % (2 * math.pi)) / (2 * math.pi) * DELTA_SECTORS
+    )
     sector %= DELTA_SECTORS
     return sector * (len(DELTA_LENGTH_EDGES) + 1) + bucket
 

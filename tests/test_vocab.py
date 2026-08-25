@@ -19,11 +19,11 @@ def test_pad_is_index_zero():
 
 
 def test_every_field_size_matches_its_table():
-    assert vocab.ACTION_SIZE == len(vocab.ACTIONS)
+    assert len(vocab.ACTIONS) == vocab.ACTION_SIZE
     assert vocab.ZONE_SIZE == vocab.ZONE_COLS * vocab.ZONE_ROWS + 1
-    assert vocab.DELTA_SIZE == vocab.DELTA_SECTORS * (len(vocab.DELTA_LENGTH_EDGES) + 1) + 1
-    assert vocab.FLAGS_SIZE == 2 * 2 * len(vocab.BODY_PARTS)
-    assert vocab.DT_SIZE == len(vocab.DT_EDGES) + 3
+    assert vocab.DELTA_SECTORS * (len(vocab.DELTA_LENGTH_EDGES) + 1) + 1 == vocab.DELTA_SIZE
+    assert 2 * 2 * len(vocab.BODY_PARTS) == vocab.FLAGS_SIZE
+    assert len(vocab.DT_EDGES) + 3 == vocab.DT_SIZE
 
 
 def test_action_names_are_unique():
