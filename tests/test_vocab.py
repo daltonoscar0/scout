@@ -30,6 +30,62 @@ def test_action_names_are_unique():
     assert len(set(vocab.ACTIONS)) == len(vocab.ACTIONS)
 
 
+# --- actions and outcomes -------------------------------------------------
+
+
+def test_every_observed_outcome_maps_to_a_declared_class():
+    # OUTCOME_MAP was built from real sportio output. If a value here ever fell
+    # outside OUTCOME_CLASSES, the f-string key would name a row that does not
+    # exist and action_index would silently return None for a real event.
+    assert set(vocab.OUTCOME_MAP.values()) <= set(vocab.OUTCOME_CLASSES)
+
+
+def test_a_completed_pass_and_an_incomplete_pass_are_different_tokens():
+    assert vocab.action_index("pass", "complete") != vocab.action_index("pass", "incomplete")
+
+
+def test_the_four_duel_outcomes_collapse_to_two_classes():
+    won = vocab.action_index("duel", "success_in_play")
+    also_won = vocab.action_index("duel", "success_out")
+    lost = vocab.action_index("duel", "lost_in_play")
+    assert won == also_won
+    assert won != lost
+
+
+def test_shot_outcomes_stay_distinct():
+    outcomes = {
+        vocab.action_index("shot", o) for o in ("goal", "saved", "blocked", "off_t", "wayward")
+    }
+    assert len(outcomes) == 5
+
+
+def test_control_tokens_are_used_bare_without_an_outcome():
+    assert vocab.action_index("half_start", None) == vocab.ACTION_LOOKUP["half_start"]
+    # A control token must not depend on the outcome it happens to carry: a
+    # substitution is tagged "tactical" or "injury", and both are the same token.
+    assert vocab.action_index("substitution", "tactical") == vocab.action_index(
+        "substitution", "injury"
+    )
+
+
+def test_an_unseen_outcome_degrades_to_na_rather_than_vanishing():
+    # This corpus spans 1958 to 2025 and the outcome vocabulary is not stable
+    # across it. An unforeseen value must still produce a usable token.
+    index = vocab.action_index("pass", "some_1958_outcome")
+    assert index is not None
+    assert index == vocab.action_index("pass", None)
+
+
+def test_an_unmodelled_event_type_returns_none_rather_than_a_wrong_row():
+    assert vocab.action_index("half_time_orange_slices", "complete") is None
+
+
+def test_every_action_type_has_a_row_for_every_outcome_class():
+    for action in vocab.ACTION_TYPES:
+        for outcome in vocab.OUTCOME_CLASSES:
+            assert f"{action}|{outcome}" in vocab.ACTION_LOOKUP
+
+
 def test_fingerprint_is_stable_across_calls():
     assert vocab.vocabulary_fingerprint() == vocab.vocabulary_fingerprint()
 

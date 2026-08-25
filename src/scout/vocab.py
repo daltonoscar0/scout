@@ -5,8 +5,8 @@ Fusing those into one symbol space is not viable: the cross product is roughly
 10^8 symbols, and a softmax over it would be tens of billions of parameters.
 
 So the token is factorized into five fields with five small embedding tables,
-summed before the first transformer block. At d_model=256 the entire embedding
-stack is about 71k parameters, which is the point.
+summed before the first transformer block. At d_model=256 the five tables total
+347 rows and about 89k parameters, which is the point.
 
     F1 action     StatsBomb event type fused with an outcome class
     F2 start_zone 12x8 grid over the canonical 105x68 pitch, plus null
@@ -30,57 +30,102 @@ import json
 import math
 from typing import Final
 
-VOCAB_VERSION: Final = "1"
+VOCAB_VERSION: Final = "2"
 
 # --------------------------------------------------------------------------
 # F1: action = event type x outcome class
 # --------------------------------------------------------------------------
 
-# Outcome classes. StatsBomb has no top-level `outcome`; it lives in type-
-# specific sub-objects (pass.outcome, duel.outcome, shot.outcome, ...) and is
-# *absent* when a pass completes. The loader maps those into this small closed
-# set, so the LM sees one consistent notion of "how did it go".
+# Outcome classes. Raw StatsBomb has no top-level outcome -- it lives in
+# type-specific sub-objects (pass.outcome, duel.outcome, ...) and is absent when
+# a pass completes -- but sportio has already lifted it to a single snake_cased
+# `outcome` column, filling in "complete" for a completed pass. What survives is
+# a long tail: 32 distinct values in four matches of Euro 2024 alone, most of
+# them rare. These seven classes are what the model sees.
 OUTCOME_CLASSES: Final = ("na", "success", "fail", "out", "goal", "blocked", "saved")
 
-# Which outcome classes are actually reachable per event type. Taking the full
-# cross product would waste ~2/3 of the table on combinations that never occur
-# (a Pressure event cannot be a goal), and dead embedding rows never receive
-# gradient. Each entry is (statsbomb_type, reachable_outcome_classes).
-#
-# NOT YET CALIBRATED AGAINST REAL DATA. This table is derived a priori from the
-# StatsBomb spec, and it is deliberately coarser than the raw outcome
-# vocabulary: StatsBomb distinguishes e.g. Duel outcomes "Lost In Play" /
-# "Lost Out" / "Success In Play" / "Success Out", which collapse to fail/success
-# here. That collapse may be discarding signal a similarity model wants. The
-# tokenizer therefore *counts* every (type, outcome) pair it cannot map and
-# reports them rather than silently bucketing, so a single pass over one
-# competition tells us whether this table needs widening. Do that before
-# training -- retraining after a vocabulary change is a full redo.
+# sportio's snake_cased outcome strings, mapped onto the seven classes. Measured
+# against real events rather than guessed -- every key below was observed.
+# Anything absent maps to "na" and is counted and reported by the tokenizer, so
+# an unseen value from an older competition surfaces as a number rather than
+# silently becoming a no-op.
+OUTCOME_MAP: Final = {
+    # completions and wins
+    "complete": "success",
+    "won": "success",
+    "success": "success",
+    "success_in_play": "success",
+    "success_out": "success",
+    "success_to_team": "success",
+    # keeper actions that retain the ball
+    "claim": "success",
+    "collected_twice": "success",
+    "in_play_safe": "success",
+    # failures that keep the ball live
+    "incomplete": "fail",
+    "lost": "fail",
+    "lost_in_play": "fail",
+    "success_to_opposition": "fail",
+    "wayward": "fail",
+    "pass_offside": "fail",
+    "in_play_danger": "fail",
+    "recovery_failure": "fail",
+    # ball leaves play
+    "out": "out",
+    "lost_out": "out",
+    "touched_out": "out",
+    "off_t": "out",
+    "injury_clearance": "out",
+    # shot outcomes
+    "goal": "goal",
+    "blocked": "blocked",
+    "saved": "saved",
+    "saved_twice": "saved",
+    "saved_to_post": "saved",
+    "saved_off_target": "saved",
+    # genuinely carry no success/failure sense
+    "unknown": "na",
+    "no_touch": "na",
+    "tactical": "na",  # substitution reason
+    "injury": "na",  # substitution reason
+}
+
+# The 23 event types that represent something a player did. Taken from sportio's
+# canonical vocabulary (snake_cased), not from raw StatsBomb type names.
 ACTION_TYPES: Final = (
-    ("Pass", ("success", "fail", "out")),
-    ("Ball Receipt*", ("success", "fail")),
-    ("Carry", ("success",)),
-    ("Pressure", ("na",)),
-    ("Duel", ("success", "fail")),
-    ("Dribble", ("success", "fail")),
-    ("Shot", ("goal", "saved", "blocked", "out", "fail")),
-    ("Clearance", ("na",)),
-    ("Interception", ("success", "fail")),
-    ("Ball Recovery", ("success", "fail")),
-    ("Block", ("na",)),
-    ("Foul Committed", ("na",)),
-    ("Foul Won", ("na",)),
-    ("Goal Keeper", ("success", "fail", "saved")),
-    ("Miscontrol", ("na",)),
-    ("Dispossessed", ("na",)),
-    ("Dribbled Past", ("na",)),
-    ("Shield", ("na",)),
-    ("50/50", ("success", "fail")),
-    ("Error", ("na",)),
-    ("Offside", ("na",)),
-    ("Own Goal Against", ("na",)),
-    ("Own Goal For", ("na",)),
-    ("Bad Behaviour", ("na",)),
+    "pass",
+    "ball_receipt",
+    "carry",
+    "pressure",
+    "duel",
+    "dribble",
+    "dribbled_past",
+    "shot",
+    "block",
+    "clearance",
+    "interception",
+    "ball_recovery",
+    "goal_keeper",
+    "miscontrol",
+    "dispossessed",
+    "shield",
+    "foul_committed",
+    "foul_won",
+    "50_50",
+    "error",
+    "own_goal_against",
+    "own_goal_for",
+    "bad_behaviour",
+)
+
+# Every (type, outcome class) pair gets a row, rather than only the pairs judged
+# reachable in advance. Restricting the table would save about two thirds of it,
+# but this corpus spans 1958 to 2025 and the outcome vocabulary is demonstrably
+# not stable across it -- an unforeseen pair would have to fall back to some
+# other row, which is a silent wrong answer rather than a loud one. The unused
+# rows cost 23 * 7 * 256 = 41k parameters and simply never receive gradient.
+ACTION_OUTCOME_PAIRS: Final = tuple(
+    f"{action}|{outcome}" for action in ACTION_TYPES for outcome in OUTCOME_CLASSES
 )
 
 # Structural markers. They carry no player action but anchor the sequence: a
@@ -92,6 +137,9 @@ CONTROL_TOKENS: Final = (
     "starting_xi",
     "tactical_shift",
     "substitution",
+    "player_on",
+    "player_off",
+    "injury_stoppage",
     "referee_ball_drop",
 )
 
@@ -100,16 +148,34 @@ CONTROL_TOKENS: Final = (
 SPECIAL_TOKENS: Final = ("PAD", "BOS", "EOS")
 
 
-def _build_actions() -> tuple[str, ...]:
-    names: list[str] = list(SPECIAL_TOKENS)
-    names.extend(CONTROL_TOKENS)
-    for event_type, outcomes in ACTION_TYPES:
-        for outcome in outcomes:
-            names.append(f"{event_type}|{outcome}")
-    return tuple(names)
+ACTIONS: Final = SPECIAL_TOKENS + CONTROL_TOKENS + ACTION_OUTCOME_PAIRS
+ACTION_LOOKUP: Final = {name: index for index, name in enumerate(ACTIONS)}
+
+# Types that exist in the canonical vocabulary but are deliberately not modelled
+# as actions. They are either control markers (handled above) or carry no
+# information about how a player plays.
+UNMODELLED_TYPES: Final = frozenset(CONTROL_TOKENS)
 
 
-ACTIONS: Final = _build_actions()
+def outcome_class(outcome: str | None) -> str:
+    """Map one snake_cased sportio outcome onto a class. Unknown values are 'na'.
+
+    Callers that care about coverage should check `outcome in OUTCOME_MAP`
+    themselves; this function never raises, because a single unrecognised
+    outcome in a 1958 World Cup file must not abort a corpus-wide tokenization.
+    """
+    if not outcome:
+        return "na"
+    return OUTCOME_MAP.get(outcome, "na")
+
+
+def action_index(event_type: str, outcome: str | None) -> int | None:
+    """Index for an (event type, outcome) pair, or None if the type is not modelled."""
+    if event_type in ACTION_LOOKUP:  # a control token, used bare
+        return ACTION_LOOKUP[event_type]
+    key = f"{event_type}|{outcome_class(outcome)}"
+    return ACTION_LOOKUP.get(key)
+
 
 # --------------------------------------------------------------------------
 # F2: start zone, a 12x8 grid over the canonical 105x68 pitch
