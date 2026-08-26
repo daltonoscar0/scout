@@ -30,7 +30,7 @@ import json
 import math
 from typing import Final
 
-VOCAB_VERSION: Final = "2"
+VOCAB_VERSION: Final = "3"
 
 # --------------------------------------------------------------------------
 # F1: action = event type x outcome class
@@ -70,15 +70,21 @@ OUTCOME_MAP: Final = {
     "pass_offside": "fail",
     "in_play_danger": "fail",
     "recovery_failure": "fail",
+    # keeper actions that fail
+    "touched_in": "fail",  # keeper got a hand to it and it went in anyway
+    "fail": "fail",
     # ball leaves play
     "out": "out",
     "lost_out": "out",
     "touched_out": "out",
     "off_t": "out",
     "injury_clearance": "out",
+    "clear": "out",  # keeper or defender put it out of danger
+    "punched_out": "out",
     # shot outcomes
     "goal": "goal",
     "blocked": "blocked",
+    "post": "out",  # off the woodwork: not a goal, not on target
     "saved": "saved",
     "saved_twice": "saved",
     "saved_to_post": "saved",
@@ -113,10 +119,18 @@ ACTION_TYPES: Final = (
     "foul_won",
     "50_50",
     "error",
+    "offside",
     "own_goal_against",
     "own_goal_for",
     "bad_behaviour",
 )
+
+# Event types that exist in the data but describe the broadcast rather than the
+# football. Listed explicitly so the tokenizer's coverage report distinguishes
+# "we chose not to model this" from "we did not know about this" -- the second
+# is a bug and the first is not, and lumping them together makes the report
+# useless for finding the first.
+IGNORED_TYPES: Final = frozenset({"camera_on", "camera_off", "camera_off*"})
 
 # Every (type, outcome class) pair gets a row, rather than only the pairs judged
 # reachable in advance. Restricting the table would save about two thirds of it,

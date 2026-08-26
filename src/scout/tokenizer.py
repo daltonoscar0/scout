@@ -42,6 +42,7 @@ class Coverage:
     events: int = 0
     tokenized: int = 0
     unmodelled_types: Counter = field(default_factory=Counter)
+    ignored_types: Counter = field(default_factory=Counter)
     unmapped_outcomes: Counter = field(default_factory=Counter)
     missing_location: int = 0
     missing_actor: int = 0
@@ -54,6 +55,7 @@ class Coverage:
         self.events += other.events
         self.tokenized += other.tokenized
         self.unmodelled_types.update(other.unmodelled_types)
+        self.ignored_types.update(other.ignored_types)
         self.unmapped_outcomes.update(other.unmapped_outcomes)
         self.missing_location += other.missing_location
         self.missing_actor += other.missing_actor
@@ -65,8 +67,12 @@ class Coverage:
             f"dropped {self.dropped:,}",
             f"  no location: {self.missing_location:,}   no actor: {self.missing_actor:,}",
         ]
+        if self.ignored_types:
+            total = sum(self.ignored_types.values())
+            names = ", ".join(sorted(self.ignored_types))
+            lines.append(f"  deliberately ignored: {total:,} ({names})")
         if self.unmodelled_types:
-            lines.append("  unmodelled event types:")
+            lines.append("  UNMODELLED event types (each one is a gap):")
             for name, count in self.unmodelled_types.most_common(15):
                 lines.append(f"    {name:<28} {count:,}")
         if self.unmapped_outcomes:
@@ -237,7 +243,15 @@ def _tokenize_stream(group: pd.DataFrame, coverage: Coverage) -> tuple[list[list
 
         action = vocab.action_index(event_type, outcome)
         if action is None:
-            coverage.unmodelled_types[event_type] += 1
+            # Deliberately-ignored broadcast events are counted separately from
+            # types we simply do not handle. Mixing them buries a real gap in
+            # the noise: the first pass over the corpus reported camera_on
+            # alongside a genuinely missing `offside`, and only the volume
+            # difference made the second one visible.
+            if event_type in vocab.IGNORED_TYPES:
+                coverage.ignored_types[event_type] += 1
+            else:
+                coverage.unmodelled_types[event_type] += 1
             continue
 
         x, y = _coord(row, "x"), _coord(row, "y")
