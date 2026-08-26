@@ -73,7 +73,7 @@ def test_importing_the_app_does_not_pull_in_torch_or_sklearn():
     # for the same reason and because the valuation model lives in an extra.
     code = (
         "import sys; import scout.app; "
-        "sys.exit(1 if {'torch', 'sklearn'} & set(sys.modules) else 0)"
+        "sys.exit(1 if {'torch', 'sklearn', 'faiss', 'lightgbm'} & set(sys.modules) else 0)"
     )
     assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0
 

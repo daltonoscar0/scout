@@ -210,10 +210,15 @@ def radar_frame(
         gender = row.iloc[0]["gender"]
         if gender is not None and not pd.isna(gender):
             pool = pool[pool["gender"] == gender]
+    restricted = True
     if pool.empty:
-        # Better a percentile against everyone than no card at all; the peer
-        # count travels with the frame so the caller can say which it was.
+        # Better a percentile against everyone than no card at all -- but the
+        # fallback drops the minutes floor *and* the same-gender restriction, so
+        # it must not be reported under a caption claiming either was applied.
+        # `restricted` travels with the frame so the caller states what actually
+        # happened rather than what was requested.
         pool = profiles
+        restricted = False
 
     records = []
     for column in columns:
@@ -227,9 +232,12 @@ def radar_frame(
                 "value": value,
                 "percentile": _percentile(pool[column].to_numpy(dtype=float), value),
                 "peers": int(len(pool)),
+                "restricted": restricted,
             }
         )
-    return pd.DataFrame(records, columns=["metric", "label", "value", "percentile", "peers"])
+    return pd.DataFrame(
+        records, columns=["metric", "label", "value", "percentile", "peers", "restricted"]
+    )
 
 
 def _radar_from_index(
@@ -582,13 +590,26 @@ def _pick_player(index: similarity.PlayerIndex, query: str) -> int | None:
         return choices[0][0]
 
     st.caption("More than one player matches. Pick one:")
-    labels = {
-        f"{name}  ({_player_row(index, pid)['competition']}, "
-        f"{_player_row(index, pid)['season']})": pid
+    # Keyed by position, not by label. Two distinct players can share a name,
+    # competition and season -- which is precisely the case a pick-list exists
+    # to disambiguate -- and a dict keyed on the label would collapse them, show
+    # one option, and hand back the other player's card with no indication that
+    # a substitution happened.
+    options = [
+        (
+            pid,
+            f"{name}  ({_player_row(index, pid)['competition']}, "
+            f"{_player_row(index, pid)['season']}, id {pid})",
+        )
         for pid, name, _ in choices
-    }
-    chosen = st.radio("Matches", list(labels), label_visibility="collapsed")
-    return labels[chosen]
+    ]
+    chosen = st.radio(
+        "Matches",
+        range(len(options)),
+        format_func=lambda i: options[i][1],
+        label_visibility="collapsed",
+    )
+    return options[chosen][0]
 
 
 def render_card(
@@ -622,9 +643,19 @@ def render_card(
             # and the declared floor is 1.38. Defaults render on both.
             st.altair_chart(radar_chart(radar))
             peers = int(radar["peers"].iloc[0])
+            restricted = bool(radar["restricted"].iloc[0]) if "restricted" in radar else True
+            if restricted:
+                pool_text = (
+                    f"against {peers:,} same-gender players with at least "
+                    f"{PEER_MIN_MINUTES:,.0f} minutes"
+                )
+            else:
+                pool_text = (
+                    f"against all {peers:,} players -- no same-gender or minutes "
+                    "filter applied, because no peer cleared them"
+                )
             st.caption(
-                f"Percentile against {peers:,} players with at least "
-                f"{PEER_MIN_MINUTES:,.0f} minutes. Rank, not rate: per-90s are not "
+                f"Percentile {pool_text}. Rank, not rate: per-90s are not "
                 "comparable across competitions."
             )
 
