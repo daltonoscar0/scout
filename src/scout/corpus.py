@@ -20,9 +20,10 @@ from pathlib import Path
 
 import numpy as np
 
-from scout import fetch, sportio_adapter, tokenizer, vocab
+from scout import fetch, metrics, sportio_adapter, tokenizer, vocab
 
 TOKENS_DIR = Path("data/derived/tokens")
+METRICS_DIR = Path("data/derived/metrics")
 
 
 class VocabularyMismatch(RuntimeError):
@@ -47,11 +48,19 @@ def build_shard(
     comp_season: dict,
     *,
     out_dir: Path = TOKENS_DIR,
+    metrics_dir: Path = METRICS_DIR,
     root: Path | None = None,
     coverage: tokenizer.Coverage | None = None,
+    minutes: dict[int, float] | None = None,
     force: bool = False,
 ) -> ShardStats | None:
-    """Tokenize one competition-season from cached events. Returns None if skipped."""
+    """Tokenize one competition-season from cached events. Returns None if skipped.
+
+    `minutes` maps player_id to minutes played in *this* competition-season, and
+    comes from the lineup crosswalk. It is passed in rather than derived here
+    because building it reads all 3,961 lineup files, which must happen once for
+    the whole build rather than once per shard.
+    """
     root = fetch.cache_root() if root is None else root
     cid, sid = comp_season["cid"], comp_season["sid"]
     path = shard_path(cid, sid, out_dir)
@@ -59,6 +68,11 @@ def build_shard(
         return None
 
     matches = fetch.matches(cid, sid, root=root)
+
+    # Metrics are accumulated in the same pass. Parsing 3,961 events files is by
+    # far the most expensive step in the build, and doing it twice to produce
+    # two artifacts from the same rows would be pure waste.
+    totals = metrics.empty_totals()
 
     token_blocks: list[np.ndarray] = []
     actor_blocks: list[np.ndarray] = []
@@ -86,6 +100,8 @@ def build_shard(
             local.unmodelled_types["<unparseable match>"] += 1
             continue
 
+        metrics.accumulate(events, totals)
+
         shard = tokenizer.tokenize_events(events)
         local.merge(shard.coverage)
         if len(shard) == 0:
@@ -101,6 +117,17 @@ def build_shard(
         coverage.merge(local)
     if not token_blocks:
         return None
+
+    if minutes is not None:
+        frame = metrics.to_frame(totals, minutes)
+        if not frame.empty:
+            frame.insert(1, "competition_id", cid)
+            frame.insert(2, "season_id", sid)
+            frame.insert(3, "competition", comp_season["comp"])
+            frame.insert(4, "season", comp_season["season"])
+            frame.insert(5, "gender", comp_season.get("gender"))
+            metrics_dir.mkdir(parents=True, exist_ok=True)
+            frame.to_parquet(metrics_dir / f"{cid}_{sid}.parquet", index=False)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     tokens = np.concatenate(token_blocks)
@@ -162,3 +189,21 @@ def load_shard(path: Path) -> tokenizer.Corpus:
 def shard_meta(path: Path) -> dict:
     with np.load(path, allow_pickle=False) as data:
         return json.loads(str(data["meta"]))
+
+
+def load_metrics(metrics_dir: Path = METRICS_DIR):
+    """All per-player metric rows across every built shard, as one frame."""
+    import pandas as pd
+
+    files = sorted(Path(metrics_dir).glob("*.parquet"))
+    if not files:
+        return pd.DataFrame()
+    return pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
+
+
+def minutes_by_comp_season(rows) -> dict[tuple[int, int], dict[int, float]]:
+    """Reshape crosswalk rows into {(competition_id, season_id): {player_id: minutes}}."""
+    out: dict[tuple[int, int], dict[int, float]] = {}
+    for row in rows:
+        out.setdefault((row.competition_id, row.season_id), {})[row.player_id] = row.minutes
+    return out

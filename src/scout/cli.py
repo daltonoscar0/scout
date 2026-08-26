@@ -123,7 +123,7 @@ def cmd_projection(args: argparse.Namespace) -> int:
 
 
 def cmd_build(args: argparse.Namespace) -> int:
-    from scout import corpus, tokenizer
+    from scout import corpus, crosswalk, tokenizer
 
     spine = _spine()
     if args.competition:
@@ -133,10 +133,19 @@ def cmd_build(args: argparse.Namespace) -> int:
             print(f"no competition matching {args.competition!r}", file=sys.stderr)
             return 2
 
+    # Read the lineup crosswalk once for the whole build rather than per shard.
+    print("building the player/minutes crosswalk...")
+    minutes = corpus.minutes_by_comp_season(crosswalk.build())
+
     coverage = tokenizer.Coverage()
     built = 0
     for comp_season in spine:
-        stats = corpus.build_shard(comp_season, coverage=coverage, force=args.force)
+        stats = corpus.build_shard(
+            comp_season,
+            coverage=coverage,
+            minutes=minutes.get((comp_season["cid"], comp_season["sid"]), {}),
+            force=args.force,
+        )
         if stats is None:
             continue
         built += 1
