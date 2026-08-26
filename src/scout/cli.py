@@ -341,10 +341,10 @@ def cmd_fit_value(args: argparse.Namespace) -> int:
     correlation, answer = valuation.residual_predicts_next_window(residuals)
 
     Path("reports").mkdir(parents=True, exist_ok=True)
-    Path("reports/valuation.md").write_text(valuation.report(model, answer, correlation))
+    Path("reports/valuation.md").write_text(valuation.report(model, answer, correlation, dataset))
     Path("data/derived").mkdir(parents=True, exist_ok=True)
     residuals.to_parquet("data/derived/valuation.parquet", index=False)
-    print(valuation.report(model, answer, correlation))
+    print(valuation.report(model, answer, correlation, dataset))
     return 0
 
 

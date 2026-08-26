@@ -123,6 +123,10 @@ class Dataset:
     target: np.ndarray
     seasons: list[str]
     player_ids: np.ndarray
+    # Years between a row's season and the season its label came from. In a
+    # dense corpus this is always 1; here it is not, and that turns out to
+    # matter more than any modelling choice.
+    gap_years: np.ndarray = field(default_factory=lambda: np.array([]))
     unmatched: list[int] = field(default_factory=list)
 
     def __len__(self) -> int:
@@ -141,15 +145,28 @@ def build_dataset(metrics: pd.DataFrame) -> Dataset:
     if metrics.empty:
         return Dataset(pd.DataFrame(), np.array([]), [], np.array([]))
 
-    frame = metrics.copy()
+    # Club football only. Tiering a World Cup against a league is a category
+    # error: a national-team tournament is not a rung on the club ladder, and
+    # treating it as the top rung made every club season *following* a
+    # tournament score zero, as if the player had dropped down. That labelled
+    # 22% of the held-out rows as collapses that never happened, against 1% in
+    # training -- a fabricated distribution shift that no model could fit and
+    # that would have been reported as "the data has no signal".
+    from scout.population import is_international
+
+    frame = metrics[~metrics["competition"].map(is_international)].copy()
+    if frame.empty:
+        return Dataset(pd.DataFrame(), np.array([]), [], np.array([]))
+
     frame["tier"] = frame["competition"].map(tier_of)
     frame["_season_key"] = frame["season"].map(season_sort_key)
 
-    rows, targets, seasons, ids = [], [], [], []
+    rows, targets, seasons, ids, gaps = [], [], [], [], []
     for player_id, group in frame.groupby("player_id"):
         ordered = group.sort_values("_season_key").to_dict("records")
         for index, current in enumerate(ordered[:-1]):
             later = ordered[index + 1 :]
+            gaps.append(int(later[0]["_season_key"][0]) - int(current["_season_key"][0]))
             # Minutes in the next season the player appears in, counted only if
             # it was at the same tier or better.
             following = later[0]
@@ -171,6 +188,7 @@ def build_dataset(metrics: pd.DataFrame) -> Dataset:
         target=np.asarray(targets, dtype=float),
         seasons=seasons,
         player_ids=np.asarray(ids, dtype=int),
+        gap_years=np.asarray(gaps, dtype=int),
     )
 
 
@@ -311,7 +329,30 @@ def residual_predicts_next_window(frame: pd.DataFrame) -> tuple[float, str]:
     )
 
 
-def report(model: ValuationModel, answer: str, correlation: float) -> str:
+def coverage_note(dataset: Dataset) -> str:
+    """How often the label really is the *next* season.
+
+    Open StatsBomb coverage is sparse and non-contiguous: a player's next
+    appearance in the corpus can be years after their last. Where that gap is
+    large the label stops meaning "next season" and starts meaning "whenever we
+    next happened to observe them", which is not something this season's
+    production can be expected to predict.
+    """
+    if dataset.gap_years.size == 0:
+        return "No gap information recorded."
+    consecutive = float((dataset.gap_years <= 1).mean())
+    return (
+        f"Only {consecutive:.1%} of rows are labelled by a genuinely consecutive "
+        f"season. For the rest the gap is 2 to {int(dataset.gap_years.max())} years, "
+        "because open coverage of any one competition is intermittent. Where the "
+        'gap is large the label means "whenever we next observed them", not "next '
+        "season\", and this season's production should not be expected to predict it."
+    )
+
+
+def report(
+    model: ValuationModel, answer: str, correlation: float, dataset: Dataset | None = None
+) -> str:
     improvement = model.metrics["baseline_mae"] - model.metrics["mae"]
     verdict = (
         f"beats the predict-the-mean baseline by {improvement:.0f} minutes MAE"
@@ -356,6 +397,10 @@ def report(model: ValuationModel, answer: str, correlation: float) -> str:
         f"| rank correlation with actual | {model.metrics['spearman']:+.3f} |",
         "",
         f"The model {verdict}.",
+        "",
+        "## Why the fit looks like this",
+        "",
+        (coverage_note(dataset) if dataset is not None else ""),
         "",
         "## Does the residual predict the next window?",
         "",
