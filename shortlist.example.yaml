@@ -1,0 +1,26 @@
+# An example shortlist for `scout export shortlist.example.yaml --xlsx out.xlsx`.
+#
+# Two shapes are accepted. The terse one is just a list of names:
+#
+#   - Bernardo Silva
+#   - Pedri
+#
+# The fuller one lets you attach a note that travels into the workbook, which is
+# usually what you want when the sheet is going to somebody else.
+
+title: January window, central midfield
+players:
+  - name: Bernardo Silva
+    note: reference profile -- looking for this shape, younger
+
+  - name: Pedri
+    note: ceiling case
+
+  # A bare name is fine when there is nothing to say about it.
+  - Declan Rice
+
+  # Names are matched fuzzily, but never guessed between close candidates. If
+  # two players match about equally well the row is written with an "ambiguous"
+  # note listing them, rather than one being silently chosen for you.
+  - name: Rodri
+    note: nickname rather than full name; check which one resolved

@@ -33,7 +33,7 @@ uv run scout build-index            # fetch, tokenize, train, embed; resumable
 uv run scout similar "Bernardo Silva" --k 10
 uv run scout project "Bernardo Silva" --to "FIFA World Cup"
 uv run scout value --league "La Liga" --top 25
-uv run scout export shortlist.yaml --xlsx out.xlsx
+uv run scout export shortlist.example.yaml --xlsx out.xlsx
 uv run scout app                    # the Streamlit scout card
 uv run scout info                   # versions, vocabulary, what is cached
 ```

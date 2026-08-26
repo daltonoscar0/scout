@@ -67,14 +67,18 @@ that says BLOCKED is blocked by the data, not by effort.
 
 ## Must do before training
 
-- **DONE -- vocabulary calibrated against real events.** The first cut keyed on
-  raw StatsBomb type names; sportio snake_cases everything, so every lookup would
-  have missed and the corpus would have been nothing but fallback tokens. Rebuilt
-  against a survey of four Euro 2024 matches: 32 event types, 32 distinct outcome
-  strings, `counterpress` inside `extra` rather than a column. Every (type,
-  outcome class) pair now gets a row rather than only the pairs judged reachable
-  in advance -- 173 action rows, 347 total. Tokenizing 14,588 real events maps
-  100% with no unmodelled types and no unmapped outcomes.
+- **DONE -- vocabulary calibrated against the whole corpus, twice.** The first cut
+  keyed on raw StatsBomb type names; sportio snake_cases everything, so every
+  lookup would have missed and the corpus would have been nothing but fallback
+  tokens. Rebuilt against a survey of four Euro 2024 matches, then corrected
+  again after the first full pass over all 13.9M events reported what it could
+  not map: 1,400 dropped `offside` events and five unmapped outcome strings,
+  including 2,225 shots off the woodwork and a literal `fail`. Both are fixed in
+  vocabulary v3 (`503a9b79fa97e0a4`, 180 action rows, 354 total).
+  `camera_on`/`camera_off` are now declared deliberately ignored and counted
+  separately, because mixing "we chose not to model this" with "we did not know
+  about this" is what nearly buried the offside gap under camera noise.
+  This is exactly why the tokenizer reports coverage instead of absorbing it.
 
 - **DONE -- LM timing measured on MPS, comfortably inside an overnight window.**
   Config S is 6,553,947 parameters and config M is 14,549,339, both under the
