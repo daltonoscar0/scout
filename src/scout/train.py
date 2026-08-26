@@ -99,7 +99,8 @@ def load_corpus(
     print(
         f"corpus capped: {len(keep):,} of {len(lengths):,} sequences "
         f"({int(lengths[keep].sum()):,} of {total:,} tokens), sampled across all "
-        f"{len(shards)} competition-seasons"
+        f"{len(shards)} competition-seasons",
+        flush=True,
     )
     return Dataset(tokens=tokens[keep], lengths=lengths[keep], match_ids=match_ids[keep])
 
@@ -192,15 +193,16 @@ def train(
     train_set, held_set = split_by_match(data, config.held_out_fraction, config.seed)
     print(
         f"sequences: {len(train_set):,} train / {len(held_set):,} held out "
-        f"({len(np.unique(held_set.match_ids)):,} matches held back)"
+        f"({len(np.unique(held_set.match_ids)):,} matches held back)",
+        flush=True,
     )
 
     baseline = bigram_perplexity(train_set, held_set)
-    print(f"bigram baseline action perplexity: {baseline:.2f}")
+    print(f"bigram baseline action perplexity: {baseline:.2f}", flush=True)
 
     device = select_device(device_preference)
     model = PossessionLM(model_config).to(device)
-    print(model.describe())
+    print(model.describe(), flush=True)
 
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
@@ -244,7 +246,8 @@ def train(
         print(
             f"epoch {epoch + 1:>3}/{config.epochs}  train {running / steps_per_epoch:.4f}  "
             f"held-out action ppl {metrics['action_perplexity']:.2f}  "
-            f"({metrics['action_perplexity'] / baseline:.2f}x bigram)  {elapsed:.1f} min"
+            f"({metrics['action_perplexity'] / baseline:.2f}x bigram)  {elapsed:.1f} min",
+            flush=True,
         )
 
         if metrics["action_perplexity"] < best:
@@ -252,11 +255,12 @@ def train(
             save_checkpoint(best_path, model, config, metrics, baseline, epoch)
 
     write_model_card(out_dir, model, config, best, baseline, (time.time() - started) / 60)
-    print(f"\nbest held-out action perplexity {best:.2f} vs bigram {baseline:.2f}")
+    print(f"\nbest held-out action perplexity {best:.2f} vs bigram {baseline:.2f}", flush=True)
     if best >= baseline:
         print(
             "WARNING: the transformer did not beat a bigram. The representation is "
-            "not worth building embeddings on -- investigate before running `scout embed`."
+            "not worth building embeddings on -- investigate before running `scout embed`.",
+            flush=True,
         )
     return best_path
 
