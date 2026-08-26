@@ -295,3 +295,33 @@ def test_the_valuation_target_has_one_spelling():
     from scout import valuation
 
     assert valuation.TARGET is caveats.VALUATION_TARGET
+
+
+# --- spec acceptance criteria --------------------------------------------
+
+
+def test_the_readme_contains_the_three_way_comparison_table():
+    # The spec requires the honest comparison in the README itself, not behind a
+    # link. It was linked-only until someone checked.
+    from pathlib import Path
+
+    readme = Path(__file__).resolve().parents[1] / "README.md"
+    text = readme.read_text()
+    for predictor in ("B0 identity", "B1 league offset", "B1b shrunk identity", "B2 embedding"):
+        assert predictor in text, f"{predictor} missing from the README comparison"
+
+
+def test_the_readme_answers_the_residual_question():
+    # The spec: print the answer in the README even if it is no.
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    assert "does not beat" in text.lower() or "null result" in text.lower()
+
+
+def test_the_projection_caveat_does_not_overclaim_the_null():
+    # After the shrinkage control was added, one stratum of four does beat both
+    # controls. A caveat still saying "no predictor beats identity" would be
+    # false, and it is shown to users on every projected number.
+    assert "no fitted predictor beat" not in caveats.PROJECTION_CAVEAT
+    assert "one of four" in caveats.PROJECTION_CAVEAT

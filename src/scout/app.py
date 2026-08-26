@@ -312,12 +312,14 @@ def projection_note() -> str:
         "**This projection is the identity: it is the player's own output, not a "
         "translation.** The open corpus cannot support a learned cross-competition "
         "projection. Only 275 women's and 211 men's players have a genuine "
-        "club-to-international move with adequate minutes on both sides, and no "
-        "predictor -- a fitted per-league offset or a low-rank map from the "
-        "embedding -- beats the identity outside its bootstrap confidence interval. "
-        "Age, which a real projection would need, does not exist in open data at "
-        'all. Read the number as "what they already do", never as "what they '
-        'would do there".'
+        "club-to-international move with adequate minutes on both sides. Scored "
+        "out of sample against two blind controls -- plain identity, and identity "
+        "shrunk toward the mean by a ridge that knows nothing about the player -- "
+        "a fitted predictor wins on one of four target/gender strata (xG+xA for "
+        "women) and on none of the other three. One result in four is not a basis "
+        "for projecting anyone. Age, which a real projection would need, does not "
+        'exist in open data at all. Read the number as "what they already do", '
+        'never as "what they would do there".'
     )
 
 

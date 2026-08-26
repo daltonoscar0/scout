@@ -104,16 +104,48 @@ neighbours are positionally coherent: Busquets returns six defensive
 midfielders, Neuer six goalkeepers, van Dijk six centre-backs, and Messi returns
 creative attackers including Aitana Bonmatí from the women's game.
 
-### Projection: does not work, with one exception
+### Projection: the honest three-way comparison
 
-See the table in the "Cross-competition projection" section below and
-`reports/projection_baselines.md`. Every fitted predictor is scored out of
-sample by k-fold grouped on player, against **two** blind controls: plain
-identity, and identity shrunk toward the mean by a ridge that knows nothing
-about the player. That second control matters -- without it the embedding
-appeared to beat identity on three of four strata, when most of the gain was
-regression to the mean. Against both controls, **one stratum of four survives**
-(xG+xA for women). scout returns the identity projection everywhere.
+Every fitted predictor is scored **out of sample**, by 5-fold cross-validation
+grouped on player, with a 1,000-sample bootstrap interval on mean absolute
+error. Lower MAE is better.
+
+| predictor | uses player information? |
+| --- | --- |
+| B0 identity | no -- predict the source value unchanged |
+| B1 league offset | no -- plus a fitted per-competition-pair shift |
+| B1b shrunk identity | no -- ridge on the source value alone |
+| B2 embedding ridge | **yes** -- low-rank projection of the player embedding |
+
+**xG+xA per 90**
+
+| predictor | male MAE (n=980) | female MAE (n=925) |
+| --- | ---: | ---: |
+| B0 identity | 0.146 `[0.136, 0.155]` | 0.155 `[0.145, 0.166]` |
+| B1 league offset | 0.157 `[0.148, 0.166]` | 0.160 `[0.150, 0.171]` |
+| B1b shrunk identity | 0.153 `[0.144, 0.161]` | 0.164 `[0.155, 0.174]` |
+| B2 embedding ridge | 0.146 `[0.138, 0.155]` | **0.135** `[0.127, 0.145]` |
+
+**Progressive actions per 90**
+
+| predictor | male MAE (n=980) | female MAE (n=925) |
+| --- | ---: | ---: |
+| B0 identity | 2.147 `[2.045, 2.254]` | 2.389 `[2.281, 2.510]` |
+| B1 league offset | 2.083 `[1.978, 2.181]` | 2.223 `[2.115, 2.349]` |
+| B1b shrunk identity | 1.959 `[1.868, 2.059]` | 2.108 `[2.009, 2.213]` |
+| B2 embedding ridge | 1.835 `[1.739, 1.934]` | 1.972 `[1.879, 2.070]` |
+
+**B1b is the control that makes this honest.** A ridge shrinks a noisy target
+toward the mean, beating carry-forward while knowing nothing about the player at
+all. Without it, B2 appears to beat identity on three of four strata and the
+obvious reading is "the embedding knows how a player translates". Against B1b,
+**three of those four wins disappear into overlapping intervals.** Only xG+xA for
+women survives both controls (0.135 against the control's 0.164).
+
+One stratum in four is not a basis for projecting anyone, so **scout returns the
+identity projection everywhere**, and says so next to every projected number.
+Regenerate with `scout projection`; full output in
+`reports/projection_baselines.md`.
 
 ### Valuation: does not beat predicting the mean
 

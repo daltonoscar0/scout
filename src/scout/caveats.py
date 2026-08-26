@@ -22,9 +22,12 @@ from typing import Final
 PROJECTION_CAVEAT: Final = (
     "Identity projection: the player's source-competition output, unchanged. "
     "The open corpus contains only 275 female and 211 male players with a "
-    "genuine club-to-international move and adequate minutes on both sides, and "
-    "no fitted predictor beat the identity null outside its bootstrap confidence "
-    "interval. Read this as 'what they did', not 'what they will do'."
+    "genuine club-to-international move and adequate minutes on both sides. "
+    "Scored out of sample against two blind controls -- plain identity, and "
+    "identity shrunk toward the mean -- a fitted predictor wins on one of four "
+    "target/gender strata (xG+xA for women) and on none of the other three. "
+    "One result in four is not a basis for projecting anyone, so scout returns "
+    "the identity. Read this as 'what they did', not 'what they will do'."
 )
 
 VALUATION_TARGET: Final = "next_season_minutes_at_tier"
