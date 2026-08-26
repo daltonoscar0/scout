@@ -20,8 +20,9 @@ competition tier, computed entirely from StatsBomb lineups. It is legally clean,
 it covers women's football, and it has thousands of labels.
 
 It is a scarcity and trust proxy, not a price, and nothing in this module
-pretends otherwise. Market value is available behind `--enable-transfermarkt`,
-which fetches at build time, never commits, and prints the terms notice first.
+pretends otherwise. There is no Transfermarkt path at all: an earlier draft
+promised an opt-in flag, and shipping that promise without the implementation
+would be worse than not offering it.
 
 Age and contract length, both of which the spec wants as features, are not
 available from open data at all. They are reported missing.
@@ -99,7 +100,7 @@ FEATURE_COLUMNS = (
 MISSING_FEATURES = {
     "age": "StatsBomb lineups carry no date of birth.",
     "contract_length": "No open source covers contracts.",
-    "market_value": "Transfermarkt's terms prohibit this use; opt in with --enable-transfermarkt.",
+    "market_value": "Transfermarkt's terms prohibit automated access and model training.",
 }
 
 
@@ -369,9 +370,9 @@ def report(
         "Transfermarkt's terms prohibit automated access and prohibit training models",
         "on their content by name, and all 65 of their competitions are men's football",
         "while a large part of this corpus is not. A minutes-at-tier target is legally",
-        "clean, covers everyone, and is a genuine scarcity proxy. Market value is",
-        "available behind `--enable-transfermarkt`, fetched at build time and never",
-        "committed.",
+        "clean, covers everyone, and is a genuine scarcity proxy. There is no",
+        "Transfermarkt path, opt-in or otherwise: shipping the promise without the",
+        "implementation would be worse than not offering it.",
         "",
         "## Features the spec asks for that open data cannot supply",
         "",

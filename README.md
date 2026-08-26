@@ -71,13 +71,64 @@ There is no non-pip prerequisite. `scikit-learn` is used instead of LightGBM
 specifically because LightGBM's dylib resolves `libomp` through Homebrew and
 fails at import on a clean machine.
 
+## Results
+
+Measured, on the corpus described below. One of the three deliverables works
+well; the other two are null results, and they are reported as such.
+
+### Similarity: works
+
+Held-out same-player retrieval. Each player's matches are split by parity into
+two disjoint halves; the query is one half and the target is the same player's
+other half among 1,500 others. Chance is 0.067%.
+
+| | recall@1 | recall@10 | mean rank |
+| --- | ---: | ---: | ---: |
+| pooled, before contrastive training | 8.1% | 29.3% | 122.2 |
+| **after contrastive training** | **33.3%** | **73.1%** | **18.2** |
+
+500x chance. The model is never shown a player's identity or position, yet the
+neighbours are positionally coherent: Busquets returns six defensive
+midfielders, Neuer six goalkeepers, van Dijk six centre-backs, and Messi returns
+creative attackers including Aitana Bonmatí from the women's game.
+
+### Projection: does not work, with one exception
+
+See the table in the "Cross-competition projection" section below and
+`reports/projection_baselines.md`. Every fitted predictor is scored out of
+sample by k-fold grouped on player, against **two** blind controls: plain
+identity, and identity shrunk toward the mean by a ridge that knows nothing
+about the player. That second control matters -- without it the embedding
+appeared to beat identity on three of four strata, when most of the gain was
+regression to the mean. Against both controls, **one stratum of four survives**
+(xG+xA for women). scout returns the identity projection everywhere.
+
+### Valuation: does not beat predicting the mean
+
+MAE 560.6 against a predict-the-training-mean baseline of 526.3, rank
+correlation -0.014. The cause is in `reports/valuation.md`: only 70.7% of rows
+are labelled by a genuinely consecutive season, because open coverage of any one
+competition is intermittent, and for the rest the label means "whenever we next
+observed them".
+
+### The language model
+
+6,557,538 parameters (spec cap: 20M). Held-out action perplexity **2.56 against
+a bigram baseline of 3.04** -- a 16% improvement, converged by epoch 14. Real,
+but not a landslide, and stated that way rather than as a win.
+
+### Latency
+
+`scout similar` returns in **1.35 s** including interpreter startup, against the
+spec's 5 s budget. The query path is numpy over a 8,988 x 256 matrix.
+
 ## What this data can and cannot support
 
 Two findings shape what ships, and both are stated up front rather than buried:
 
 **Similarity works.** Contrastive positives come from splitting a single player's
-own season by match parity, which yields thousands of training pairs across the
-roughly 3,000 players clearing the minutes floor.
+own matches by parity, which yields 6,605 training pairs across the players
+clearing the touches floor -- and the retrieval numbers above are what that buys.
 
 **Cross-competition projection does not.** The spec asks to project a player
 from competition A into competition B, trained on players appearing in both.
@@ -122,9 +173,15 @@ this corpus is not, so those players would silently lose their target variable.
 The shipped default target is **next-season minutes at the same or a better
 competition tier**, computed from StatsBomb lineups alone. It is legally clean,
 covers everyone, and has thousands of labels. It is a scarcity proxy, **not a
-price**, and every surface that shows it says so. Market value remains available
-behind `scout value --enable-transfermarkt`, fetched at build time and never
-committed.
+price**, and every surface that shows it says so.
+
+**There is no Transfermarkt path, opt-in or otherwise.** An earlier draft
+promised a `--enable-transfermarkt` flag. It was never built, and shipping the
+promise without the implementation is worse than not offering it: their terms
+prohibit both automated access and training models on the content, their
+coverage is entirely men's football, and the valuation model does not beat
+predicting the mean even on the clean target. Nothing here would be improved by
+adding a legally doubtful data source to it.
 
 Three features the spec asks for cannot be built from open data at all, and are
 reported missing rather than quietly dropped: **age** and **contract length**

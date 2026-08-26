@@ -1,0 +1,43 @@
+{
+  "bundle_version": 1,
+  "built": "2026-08-26T18:38:17+00:00",
+  "players": 200,
+  "dim": 256,
+  "vocab_fingerprint": "503a9b79fa97e0a4",
+  "source_index": {
+    "vocab_fingerprint": "503a9b79fa97e0a4",
+    "vocab_version": "3",
+    "checkpoint": "models/possession_lm.pt",
+    "dim": 256,
+    "min_touches": 50,
+    "max_positions_per_player": 256,
+    "players": 8988,
+    "shards": 80,
+    "retrieval_before_contrastive": {
+      "players": 1500,
+      "evaluated": true,
+      "recall_at_1": 0.0806666687130928,
+      "recall_at_10": 0.2926666736602783,
+      "mean_rank": 122.16533660888672,
+      "chance_recall_at_1": 0.0006666666666666666
+    },
+    "retrieval_after_contrastive": {
+      "players": 1500,
+      "evaluated": true,
+      "recall_at_1": 0.33266666531562805,
+      "recall_at_10": 0.7306666374206543,
+      "mean_rank": 18.248666763305664,
+      "chance_recall_at_1": 0.0006666666666666666
+    },
+    "contrastive": {
+      "pairs": 6605,
+      "trained": true,
+      "first_loss": 3.2715586240474996,
+      "last_loss": 1.7587613921899061
+    }
+  },
+  "source_index_dir": "data/derived/index",
+  "source_players": 8988,
+  "metric_rows": 1441,
+  "bytes": 469501
+}

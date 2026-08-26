@@ -14,9 +14,11 @@ that says BLOCKED is blocked by the data, not by effort.
   identifiable people. The CC0 label on the third-party mirror is a unilateral
   declaration by someone who did not hold the rights to grant it.
   Not legal advice, but this is a conscious decision, not one the build should
-  make silently. Current plan: valuation ships with a different default target
-  (below); Transfermarkt is opt-in, fetched at build time, gitignored, never
-  redistributed.
+  make silently. **Resolved: there is no Transfermarkt path at all.** An earlier
+  draft promised an opt-in `--enable-transfermarkt` flag; it was never built and
+  the promise has been struck rather than stubbed. Valuation ships on a target
+  computed from StatsBomb alone. Revisit only if someone decides the licensing
+  question differently, and implement it fully if so.
 
 ## Known-degraded against the spec
 
@@ -38,13 +40,15 @@ that says BLOCKED is blocked by the data, not by effort.
   gap between "thousands" and "211" -- same players, same data -- is the single
   most important fact about what this corpus can and cannot support.
 
-- **Valuation's default target is not money.** It is `next_season_minutes_at_tier`
+- **Valuation's target is not money, and does not beat its baseline.** It is
+  `next_season_minutes_at_tier`
   -- minutes played the following season at the same-or-higher competition tier,
   computed from StatsBomb lineups alone. Legally clean, covers women's football
   (which Transfermarkt does not cover at all: all 65 of its competitions are
   men's), thousands of labels. It is a scarcity proxy, not a price, and the docs
-  say so. `--enable-transfermarkt` switches to log market value, scoped to men's
-  club competitions 2004 onward.
+  say so. Measured: MAE 560.6 against a predict-the-mean baseline of 526.3, so
+  the model does not beat its baseline. `reports/valuation.md` gives the cause --
+  only 70.7% of rows are labelled by a genuinely consecutive season.
 
 - **FAISS is banned, and the spec's FAISS index is replaced by brute-force
   numpy.** faiss-cpu and torch each vendor their own libomp; importing both in
@@ -91,18 +95,18 @@ that says BLOCKED is blocked by the data, not by effort.
   regression that is invisible by default, so this is worth rechecking after any
   change to the model's operator set.
 
-- **Measure the 2+-competition population exactly.** The figures above come from
-  a partial sample. A full pass over all 3,961 lineup files costs ~20 MB gzipped
-  and about 33 minutes at 2 req/s. If the corpus-wide club-to-international
-  population at >=270 min/side comes in under 300, the projection module is
-  declared hollow before any model code is written.
+- **DONE -- the 2+-competition population is measured, not sampled.** All 3,961
+  lineups. The club-to-international population came in at 275 female / 211 male,
+  both under 300, so the projection module was declared hollow before any model
+  code was written. See the entry above.
 
 ## Environment
 
-- **`brew install libomp` is a hard prerequisite** for the `models` extra.
-  lightgbm links `@rpath/libomp.dylib` and works on this machine only because
-  Homebrew's libomp happens to be present. On a clean Mac or a CI runner it fails
-  at import. Preflight check needed.
+- **RESOLVED -- there is no non-pip prerequisite.** lightgbm was dropped for
+  scikit-learn precisely because lightgbm links `@rpath/libomp.dylib` through
+  Homebrew and fails at import on a clean Mac or CI runner, with an error the
+  user cannot act on. sklearn vendors its own OpenMP. No preflight check is
+  needed because there is nothing to check.
 
 - **sportio has no player/minutes crosswalk yet.** It exports `load_events`,
   `corners`, `set_pieces` and friends, but nothing that answers "which players

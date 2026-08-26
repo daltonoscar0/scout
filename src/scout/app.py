@@ -430,7 +430,17 @@ def value_table(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty or not set(needed) <= set(frame.columns):
         return pd.DataFrame(columns=list(VALUE_COLUMNS))
 
-    work = frame[needed].copy()
+    # Club football only, matching `valuation.build_dataset`. Tiering a World Cup
+    # against a league is a category error: with tournaments at the top rung,
+    # every club season following one scored zero as a "tier drop" that never
+    # happened. Omitting the filter here would show the gauge a different target
+    # than the one the model was fitted on, which is the kind of divergence
+    # nobody notices because both numbers look reasonable.
+    from scout.population import is_international
+
+    work = frame.loc[~frame["competition"].map(is_international), needed].copy()
+    if work.empty:
+        return pd.DataFrame(columns=list(VALUE_COLUMNS))
     work["tier"] = work["competition"].map(valuation.tier_of)
     # A stable sort so two competitions inside one season keep a deterministic
     # order; which of them counts as "next" is arbitrary either way, but it must

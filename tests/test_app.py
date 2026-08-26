@@ -41,11 +41,16 @@ def make_index(n: int = N_PLAYERS, dim: int = 8, seed: int = 0) -> similarity.Pl
 
 
 def make_metrics(n: int = N_PLAYERS) -> pd.DataFrame:
-    """Two seasons per player, in two competitions, with output rising with id."""
+    """Two seasons per player, in two competitions, with output rising with id.
+
+    Both competitions are club football on purpose. The value target is defined
+    over club seasons only -- tiering a World Cup against a league is a category
+    error -- so a fixture built from tournaments would exercise nothing.
+    """
     rows = []
     for player_id in range(1, n + 1):
         gender = "male" if player_id <= n // 2 else "female"
-        for season, competition in (("2023", "Premier League"), ("2024", "UEFA Euro")):
+        for season, competition in (("2023", "Premier League"), ("2024", "La Liga")):
             row = {
                 "player_id": player_id,
                 "competition": competition,
@@ -202,7 +207,7 @@ def test_a_player_absent_from_the_metrics_gets_no_projection_row():
 
 def test_the_source_competition_is_where_the_player_played_most():
     frame = make_metrics()
-    frame.loc[frame["competition"] == "UEFA Euro", "minutes"] = 5.0
+    frame.loc[frame["competition"] == "La Liga", "minutes"] = 5.0
     assert app.source_competition(frame, 4) == "Premier League"
 
 
