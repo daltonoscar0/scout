@@ -57,27 +57,51 @@ class Dataset:
         return int(self.tokens.shape[0])
 
 
-def load_corpus(tokens_dir: Path = corpus.TOKENS_DIR, max_events: int | None = None) -> Dataset:
+def load_corpus(
+    tokens_dir: Path = corpus.TOKENS_DIR,
+    max_events: int | None = None,
+    seed: int = 0,
+) -> Dataset:
+    """Load every shard, then subsample uniformly if a cap is set.
+
+    The cap subsamples *sequences at random across the whole corpus*. Reading
+    shards until the budget fills would be simpler and badly wrong: shards are
+    named by competition id, so a 3M-event cap would train on the handful of
+    competitions that sort first and never see the rest. The corpus spans men's
+    and women's football, 1958 to 2025 and eight countries -- a truncation is not
+    a sample of it.
+    """
     shards = sorted(tokens_dir.glob("*.npz"))
     if not shards:
         raise SystemExit(f"no token shards in {tokens_dir}. Run `scout build` first.")
 
     token_blocks, length_blocks, match_blocks = [], [], []
-    total = 0
     for path in shards:
         shard = corpus.load_shard(path)  # raises on a vocabulary mismatch
         token_blocks.append(shard.tokens)
         length_blocks.append(shard.lengths)
         match_blocks.append(shard.match_ids)
-        total += int(shard.lengths.sum())
-        if max_events is not None and total >= max_events:
-            break
 
-    return Dataset(
-        tokens=np.concatenate(token_blocks),
-        lengths=np.concatenate(length_blocks),
-        match_ids=np.concatenate(match_blocks),
+    tokens = np.concatenate(token_blocks)
+    lengths = np.concatenate(length_blocks)
+    match_ids = np.concatenate(match_blocks)
+
+    total = int(lengths.sum())
+    if max_events is None or total <= max_events:
+        return Dataset(tokens=tokens, lengths=lengths, match_ids=match_ids)
+
+    # Sample whole sequences, in a stable order, until the token budget is met.
+    rng = np.random.default_rng(seed)
+    order = rng.permutation(len(lengths))
+    running = np.cumsum(lengths[order])
+    keep = order[: int(np.searchsorted(running, max_events) + 1)]
+    keep.sort()
+    print(
+        f"corpus capped: {len(keep):,} of {len(lengths):,} sequences "
+        f"({int(lengths[keep].sum()):,} of {total:,} tokens), sampled across all "
+        f"{len(shards)} competition-seasons"
     )
+    return Dataset(tokens=tokens[keep], lengths=lengths[keep], match_ids=match_ids[keep])
 
 
 def split_by_match(data: Dataset, fraction: float, seed: int) -> tuple[Dataset, Dataset]:
