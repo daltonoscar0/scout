@@ -32,7 +32,15 @@ dependencies = [
 # `scout train` / `scout embed` only. Never imported by the query path.
 train = ["torch>=2.4"]
 # `scout fit-value` only. Never imported in the same process as torch.
-models = ["lightgbm>=4.5", "scikit-learn>=1.5"]
+#
+# scikit-learn rather than LightGBM. lightgbm's dylib links @rpath/libomp.dylib
+# and resolves it through Homebrew, so it imports on a machine that happens to
+# have `brew install libomp` and fails on a clean Mac or a CI runner with an
+# error the user cannot act on. sklearn vendors its own OpenMP and needs no
+# non-pip prerequisite. HistGradientBoostingRegressor is the same algorithm
+# family, and on a few thousand rows the accuracy difference is not worth an
+# install-time failure.
+models = ["scikit-learn>=1.5"]
 
 [project.scripts]
 scout = "scout.cli:main"
