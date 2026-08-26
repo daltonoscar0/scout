@@ -7,9 +7,6 @@ in a target competition, and a model-implied value against a market baseline.
 Ships as a CLI, a Streamlit scout card, and an Excel export, with a prebuilt
 index so queries run without retraining.
 
-**Status: in development.** The vocabulary and the sportio adapter are in place.
-The tokenizer, LM, embeddings, projection and valuation are not yet built.
-
 ## How it works
 
 Possessions from StatsBomb open data are tokenized into sequences, a small causal
@@ -20,23 +17,49 @@ are near neighbours in that space.
 The token is factorized into five fields rather than fused into one symbol, and
 that choice is load-bearing. A fused (action, zone, delta, flags, dt) space is on
 the order of 10^8 symbols; the softmax alone would be tens of billions of
-parameters. Five small embedding tables summed before the first block cost about
-71k parameters at `d_model=256`. Run `python -m scout.vocab` to print the table.
+parameters. Five small embedding tables summed before the first block total 347
+rows and about 89k parameters at `d_model=256`. Run `python -m scout.vocab` to
+print the table.
 
-## Install
+## Quickstart
 
 ```sh
-uv sync                      # query path: CLI, app, export
-uv sync --extra train        # adds torch, for `scout train` / `scout embed`
-uv sync --extra models       # adds lightgbm, for `scout fit-value`
+uv sync                             # query path only: CLI, app, export
+uv run scout demo                   # runs offline from the bundled index
+
+uv sync --extra train --extra models   # everything, for a rebuild
+uv run scout build-index            # fetch, tokenize, train, embed; resumable
+
+uv run scout similar "Bernardo Silva" --k 10
+uv run scout project "Bernardo Silva" --to "FIFA World Cup"
+uv run scout value --league "La Liga" --top 25
+uv run scout export shortlist.yaml --xlsx out.xlsx
+uv run scout app                    # the Streamlit scout card
+uv run scout info                   # versions, vocabulary, what is cached
 ```
 
-`--extra models` additionally needs `brew install libomp`.
+`scout build-index` is the single documented rebuild. Every stage skips work
+already on disk, so if it is interrupted you rerun the same command and it
+resumes rather than starting over.
 
-The dependency split is deliberate. The query path never imports torch: importing
-it costs 2-4 seconds cold, which would consume most of the sub-5-second latency
-budget on its own. Training and scoring run offline as separate processes and
-export plain arrays the query path memory-maps.
+### The dependency split is deliberate
+
+| install | contains | used by |
+| --- | --- | --- |
+| `uv sync` | numpy, pandas, streamlit, openpyxl | everything on the query path |
+| `--extra train` | torch | `scout train`, `scout embed` |
+| `--extra models` | scikit-learn | `scout fit-value` |
+
+The query path never imports torch. Importing it costs 2-4 seconds cold, which
+would consume most of the spec's sub-5-second budget before any work happened,
+and Streamlit reruns its script on every interaction. Training and model fitting
+run offline in separate processes and export plain arrays the query path
+memory-maps. A test asserts `torch` is absent from `sys.modules` after importing
+the query path, so this cannot regress by accident.
+
+There is no non-pip prerequisite. `scikit-learn` is used instead of LightGBM
+specifically because LightGBM's dylib resolves `libomp` through Homebrew and
+fails at import on a clean machine.
 
 ## What this data can and cannot support
 
@@ -78,15 +101,43 @@ That contrast -- thousands of training pairs for similarity, 211 for projection,
 from the same players in the same data -- is the most important thing to
 understand about open football data.
 
-**Valuation does not predict money by default.** See `TODO.md`; Transfermarkt's
-terms prohibit exactly this use, so the default target is next-season minutes at
-tier, computed from StatsBomb alone.
+**Valuation does not predict money.** The spec asks to regress Transfermarkt
+market value. Their terms (clause 11.1) prohibit automated access *and* prohibit
+using the content to train machine learning models, by name; the spec also asks
+to commit the snapshot into `data/`, which would make this repo a redistribution
+point for scraped commercial data covering ~50,000 identifiable people. On top of
+that, all 65 of Transfermarkt's competitions are men's football while much of
+this corpus is not, so those players would silently lose their target variable.
+
+The shipped default target is **next-season minutes at the same or a better
+competition tier**, computed from StatsBomb lineups alone. It is legally clean,
+covers everyone, and has thousands of labels. It is a scarcity proxy, **not a
+price**, and every surface that shows it says so. Market value remains available
+behind `scout value --enable-transfermarkt`, fetched at build time and never
+committed.
+
+Three features the spec asks for cannot be built from open data at all, and are
+reported missing rather than quietly dropped: **age** and **contract length**
+(no open source carries either) and **market value** (above).
+
+`reports/valuation.md` answers the spec's out-of-sample question -- do residuals
+predict next-window value changes? -- with whatever the data says, including no.
 
 ## Sources and licences
 
 | Source | Used for | Licence |
 | --- | --- | --- |
-| StatsBomb open data (via sportio) | events, lineups, 360 frames | StatsBomb open data terms, non-commercial, attribution required |
-| Transfermarkt mirror | optional valuation target | **not redistributed**; opt-in, fetched at build time, see `TODO.md` |
+| StatsBomb open data (via sportio) | events, lineups | StatsBomb open data terms: free for public research and analysis, attribution required, non-commercial |
+| Transfermarkt mirror | optional valuation target | **not redistributed.** Opt-in, fetched at build time, gitignored. Their terms prohibit automated access and ML training; see `TODO.md` |
 
-Player similarity and projection here are derived from StatsBomb open data.
+Everything shipped here is derived from StatsBomb open data. Nothing under
+`data/` is committed.
+
+## Reports
+
+| file | what it answers |
+| --- | --- |
+| `reports/projection_power.md` | can the corpus support a projection head at all? |
+| `reports/projection_baselines.md` | the three-way comparison, scored out of sample |
+| `reports/valuation.md` | the fit, and whether residuals persist between windows |
+| `models/MODEL_CARD.md` | the LM's architecture, training and honest result |
