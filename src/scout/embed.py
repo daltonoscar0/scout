@@ -460,10 +460,18 @@ def build_index(
                 "player_id": player_id,
                 "name": best.player_name if best else f"player {player_id}",
                 "nickname": best.player_nickname if best else None,
+                # The competition and season of the player's *heaviest* season,
+                # which is what the card labels them by.
                 "competition": best.competition if best else "",
                 "season": best.season if best else "",
                 "gender": best.gender if best else None,
+                # Two different minutes, kept apart because conflating them
+                # printed "La Liga 2014/2015, 50806 min" for a player whose
+                # actual 2014/15 was 3,489 minutes. `minutes` is career minutes
+                # across everything in the corpus and is what the eligibility
+                # floor uses; `season_minutes` belongs to the labelled season.
                 "minutes": float(sum(r.minutes for r in seasons)),
+                "season_minutes": float(best.minutes) if best else 0.0,
                 "competitions": len({(r.competition_id, r.season_id) for r in seasons}),
                 "position": best.main_position if best else None,
                 "country": best.country if best else None,

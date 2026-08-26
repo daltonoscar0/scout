@@ -410,12 +410,17 @@ def cmd_similar(args: argparse.Namespace) -> int:
         player_id, k=args.k, min_minutes=args.min_minutes, position=args.position
     )
     row = index.players[index.players["player_id"] == player_id].iloc[0]
-    print(f"{row['name']}  ({row['competition']} {row['season']}, {row['minutes']:.0f} min)")
+    season_minutes = row.get("season_minutes", row["minutes"])
+    print(
+        f"{row['name']}  ({row['competition']} {row['season']}, "
+        f"{float(season_minutes):,.0f} min that season; "
+        f"{float(row['minutes']):,.0f} min across the corpus)"
+    )
     print()
     for rank, match in enumerate(matches, 1):
         print(
             f"  {rank:>2}. {match.score:.3f}  {match.name[:34]:<34} "
-            f"{match.competition[:20]:<20} {match.season:<10} {match.minutes:>6.0f} min"
+            f"{match.competition[:20]:<20} {match.season:<10} {match.minutes:>7,.0f} min"
         )
     return 0
 
