@@ -166,3 +166,24 @@ def test_the_report_says_so_when_nothing_beats_identity():
     noise = {p.player_id: rng.normal(size=32).astype(np.float32) for p in pairs}
     text = projection.report([projection.evaluate(pairs, "xg_xa_per90", "male", noise)])
     assert "No predictor beats identity" in text
+
+
+def test_shrinkage_alone_does_not_count_as_the_embedding_working():
+    # A ridge shrinks a noisy target toward the mean and beats carry-forward
+    # while knowing nothing about the player. Without the B1b control that gain
+    # was being read as "the embedding captures how a player translates".
+    rng = np.random.default_rng(7)
+    pairs = projection.build_pairs(metrics_frame())
+    noise = {p.player_id: rng.normal(size=32).astype(np.float32) for p in pairs}
+    comparison = projection.evaluate(pairs, "progressive_actions_per90", "male", noise)
+    names = [s.name for s in comparison.scores]
+    assert "B1b shrunk identity" in names
+    # With an uninformative embedding, B2 must not resolve as a win even if it
+    # beats plain identity on MAE.
+    assert not comparison.resolved()
+
+
+def test_the_control_is_the_best_player_blind_predictor():
+    comparison = projection.evaluate(projection.build_pairs(metrics_frame()), "xg_xa_per90", "male")
+    assert comparison.control.name in ("B0 identity", "B1b shrunk identity")
+    assert comparison.control.mae <= comparison.null.mae

@@ -176,6 +176,38 @@ def predict_league_offset(
     )
 
 
+def fit_shrunk_identity(pairs: list[Pair], target: str, alpha: float = 10.0):
+    """B1b: ridge on the source value alone -- identity, shrunk toward the mean.
+
+    This exists to make B2 falsifiable. A ridge on a noisy target beats
+    carry-forward simply by shrinking outliers toward the mean, with no
+    knowledge of the player whatsoever. Without this control, "B2 beats
+    identity" would be reported as evidence that the embedding captures how a
+    player translates between competitions, when it may be evidence of nothing
+    more than regression to the mean.
+    """
+    rows = [
+        (p.source[target], p.target[target])
+        for p in pairs
+        if np.isfinite(p.source[target]) and np.isfinite(p.target[target])
+    ]
+    if len(rows) < 10:
+        return None
+    features = np.column_stack([np.array([r[0] for r in rows]), np.ones(len(rows))])
+    y = np.array([r[1] for r in rows])
+    penalty = alpha * np.eye(2)
+    penalty[-1, -1] = 0.0
+    return np.linalg.solve(features.T @ features + penalty, features.T @ y)
+
+
+def predict_shrunk_identity(pairs: list[Pair], target: str, coefficients) -> np.ndarray:
+    out = []
+    for pair in pairs:
+        source = pair.source[target]
+        out.append(np.nan if not np.isfinite(source) else float(coefficients @ [source, 1.0]))
+    return np.array(out)
+
+
 def fit_embedding_ridge(
     pairs: list[Pair],
     target: str,
@@ -265,9 +297,20 @@ class Comparison:
     def null(self) -> Score:
         return next(s for s in self.scores if s.name == "B0 identity")
 
+    @property
+    def control(self) -> Score:
+        """The strongest predictor that uses no player-specific information."""
+        blind = [s for s in self.scores if s.name in ("B0 identity", "B1b shrunk identity")]
+        return min(blind, key=lambda s: s.mae)
+
     def resolved(self) -> bool:
-        """Did anything beat the null outside its confidence interval?"""
-        return any(s.beats(self.null) for s in self.scores if s.name != "B0 identity")
+        """Did the embedding beat *both* the null and the shrinkage control?
+
+        Beating identity alone is not enough: shrinkage does that without any
+        player information at all.
+        """
+        embedding = [s for s in self.scores if s.name.startswith("B2")]
+        return any(s.beats(self.null) and s.beats(self.control) for s in embedding)
 
 
 N_FOLDS = 5
@@ -345,6 +388,16 @@ def evaluate(
         )
     )
 
+    def shrunk_fit_predict(train, test, target_name):
+        fitted = fit_shrunk_identity(train, target_name)
+        if fitted is None:
+            return None
+        return predict_shrunk_identity(test, target_name, fitted)
+
+    shrunk = _cross_val_predict(usable, target, shrunk_fit_predict, folds, seed)
+    if np.isfinite(shrunk).any():
+        scores.append(_score("B1b shrunk identity", shrunk, actual, seed))
+
     if embeddings:
 
         def ridge_fit_predict(train, test, target_name):
@@ -376,6 +429,7 @@ def report(comparisons: list[Comparison]) -> str:
         "| --- | --- |",
         "| B0 identity | predict the source value unchanged -- the null hypothesis |",
         "| B1 league offset | identity plus a fitted per-competition-pair shift |",
+        "| B1b shrunk identity | ridge on the source value alone -- no player information |",
         "| B2 embedding ridge | low-rank embedding projection, plus the source value |",
         "",
         "B1 and B2 have fitted parameters and are scored **out of sample**, by",
@@ -404,18 +458,30 @@ def report(comparisons: list[Comparison]) -> str:
                 f"[{score.low:.3f}, {score.high:.3f}] | {score.n} |"
             )
         lines.append("")
+        embedding = [x for x in comparison.scores if x.name.startswith("B2")]
+        beats_null = [x for x in embedding if x.beats(comparison.null)]
         if comparison.resolved():
             lines.append(
-                f"**{comparison.winner.name} beats identity** outside the null's "
-                "confidence interval."
+                f"**{comparison.winner.name} beats both identity and the shrinkage "
+                "control** outside their confidence intervals. On this stratum the "
+                "embedding carries cross-competition information that shrinkage alone "
+                "does not explain."
+            )
+        elif beats_null:
+            lines.append(
+                "**The embedding beats identity, but not the shrinkage control.** "
+                "A ridge that knows nothing about the player does about as well, so "
+                "the gain is regression to the mean on a noisy target rather than "
+                "evidence that the embedding knows how this player translates. scout "
+                "returns the identity projection."
             )
         else:
             lines.append(
                 "**No predictor beats identity outside its confidence interval.** "
                 "At this sample size the difference is not resolvable, which is the "
                 "expected result given the population measured in "
-                "`projection_power.md`. scout therefore returns the identity "
-                "projection and says so wherever a projected number appears."
+                "`projection_power.md`. scout returns the identity projection and "
+                "says so wherever a projected number appears."
             )
         lines.append("")
 
