@@ -41,6 +41,21 @@ from scout.model import ModelConfig, PossessionLM, select_device
 EMBED_DIM = 256
 MIN_TOUCHES = 50
 
+# Cap on how many of a player's token positions are held in memory for pooling.
+#
+# Collecting every position is not affordable: the corpus has 13.85M positions
+# with an actor, which at 256 dims in float16 is 6.6 GiB of hidden states, on a
+# 16 GiB machine that is also running five other builds. It would swap, and
+# there is no disk to swap into.
+#
+# It is also unnecessary. Pooling estimates a player's central tendency; 256
+# positions sampled uniformly from a career is a large sample for that, and a
+# 3,000-minute season only yields ~2,000 touches in the first place. What
+# matters is that the sample is *uniform over the whole stream* rather than the
+# first N positions, which would be biased toward whichever matches happen to
+# sort first -- so this is a reservoir, not a truncation.
+MAX_POSITIONS_PER_PLAYER = 256
+
 
 class CheckpointMismatch(RuntimeError):
     """A checkpoint was trained under a different vocabulary."""
@@ -98,6 +113,37 @@ def load_checkpoint(path: Path, device: torch.device) -> PossessionLM:
     return model
 
 
+class _Reservoir:
+    """Uniform sample of at most `capacity` vectors from an unbounded stream.
+
+    Classic reservoir sampling: the first `capacity` items are kept, and item n
+    thereafter replaces a random held item with probability capacity/n. Every
+    position a player ever touched has the same chance of being in the final
+    sample, no matter how many they had or what order the shards arrived in.
+    """
+
+    __slots__ = ("capacity", "rng", "seen", "kept")
+
+    def __init__(self, capacity: int, rng: np.random.Generator) -> None:
+        self.capacity = capacity
+        self.rng = rng
+        self.seen = 0
+        self.kept: list[np.ndarray] = []
+
+    def add(self, block: np.ndarray) -> None:
+        for vector in block:
+            self.seen += 1
+            if len(self.kept) < self.capacity:
+                self.kept.append(vector)
+            else:
+                index = int(self.rng.integers(0, self.seen))
+                if index < self.capacity:
+                    self.kept[index] = vector
+
+    def stack(self) -> np.ndarray:
+        return np.stack(self.kept) if self.kept else np.zeros((0, 0), dtype=np.float16)
+
+
 @torch.no_grad()
 def collect_player_states(
     model: PossessionLM,
@@ -105,54 +151,87 @@ def collect_player_states(
     device: torch.device,
     batch_size: int = 64,
     match_filter: set[int] | None = None,
-) -> dict[int, list[np.ndarray]]:
-    """Hidden states at each player's own token positions, gathered per player.
+    max_positions: int = MAX_POSITIONS_PER_PLAYER,
+    seed: int = 0,
+) -> dict[int, dict[int, _Reservoir]]:
+    """A bounded uniform sample of each player's hidden states, keyed by player.
 
-    Returned as float16 to keep memory sane: a few thousand players with
-    hundreds of touches each at 256 dims is otherwise gigabytes.
+    Stored as float16 and capped per player, so peak memory is a function of the
+    player count rather than of the corpus size. See MAX_POSITIONS_PER_PLAYER
+    for why an uncapped version is not affordable here.
     """
-    states: dict[int, list[np.ndarray]] = defaultdict(list)
+    rng = np.random.default_rng(seed)
+    # Two reservoirs per player, split by the parity of the match id. They are
+    # disjoint by construction, which is exactly what the contrastive stage
+    # needs: two independent samples of the same player, from different matches,
+    # so a positive pair cannot be two views of one possession. Collecting both
+    # in one pass avoids running the LM over the corpus twice.
+    states: dict[int, dict[int, _Reservoir]] = {}
+    half = max(1, max_positions // 2)
 
     for path in shards:
         shard = corpus.load_shard(path)
         for start in range(0, len(shard), batch_size):
             tokens_np = shard.tokens[start : start + batch_size]
             actors_np = shard.actors[start : start + batch_size]
+            match_np = shard.match_ids[start : start + batch_size]
             if match_filter is not None:
-                keep = np.array(
-                    [int(m) in match_filter for m in shard.match_ids[start : start + batch_size]]
-                )
+                keep = np.array([int(m) in match_filter for m in match_np])
                 if not keep.any():
                     continue
-                tokens_np, actors_np = tokens_np[keep], actors_np[keep]
+                tokens_np, actors_np, match_np = tokens_np[keep], actors_np[keep], match_np[keep]
 
             tokens = torch.from_numpy(tokens_np.astype(np.int64)).to(device)
             hidden = model.hidden_states(tokens).to("cpu").numpy().astype(np.float16)
 
             for row in range(hidden.shape[0]):
                 actors = actors_np[row]
+                parity = int(match_np[row]) % 2
                 for player_id in np.unique(actors):
                     if player_id < 0:
                         continue
-                    states[int(player_id)].append(hidden[row][actors == player_id])
+                    per_player = states.setdefault(int(player_id), {})
+                    reservoir = per_player.get(parity)
+                    if reservoir is None:
+                        reservoir = _Reservoir(half, rng)
+                        per_player[parity] = reservoir
+                    reservoir.add(hidden[row][actors == player_id])
 
     return states
 
 
+def touches(halves: dict[int, _Reservoir]) -> int:
+    """How many positions this player actually had, before sampling."""
+    return sum(r.seen for r in halves.values())
+
+
+def stack_all(halves: dict[int, _Reservoir]) -> np.ndarray:
+    blocks = [r.stack() for r in halves.values() if r.kept]
+    return np.concatenate(blocks) if blocks else np.zeros((0, 0), dtype=np.float16)
+
+
 def pool_all(
-    states: dict[int, list[np.ndarray]],
+    states: dict[int, dict[int, _Reservoir]],
     head: PoolingHead,
     device: torch.device,
     min_touches: int = MIN_TOUCHES,
 ) -> tuple[np.ndarray, list[int]]:
-    """Pool each player's states into one L2-normalised vector."""
+    """Pool each player's sampled states into one L2-normalised vector.
+
+    The touches floor is applied against how many positions the player actually
+    had, not against how many were sampled -- otherwise the reservoir cap would
+    silently become the floor and a 2,000-touch player would be indistinguishable
+    from a 256-touch one.
+    """
     ids: list[int] = []
     vectors: list[np.ndarray] = []
     head.eval()
     with torch.no_grad():
-        for player_id, blocks in sorted(states.items()):
-            stacked = np.concatenate(blocks)
-            if stacked.shape[0] < min_touches:
+        for player_id, halves in sorted(states.items()):
+            if touches(halves) < min_touches:
+                continue
+            stacked = stack_all(halves)
+            if stacked.shape[0] == 0:
                 continue
             hidden = torch.from_numpy(stacked.astype(np.float32)).to(device)
             pooled = head(hidden, None).to("cpu").numpy()
@@ -161,6 +240,125 @@ def pool_all(
     if not vectors:
         return np.zeros((0, head.project[-1].out_features), dtype=np.float32), []
     return np.stack(vectors).astype(np.float32), ids
+
+
+def train_pooling_head(
+    states: dict[int, dict[int, _Reservoir]],
+    head: PoolingHead,
+    device: torch.device,
+    config: EmbedConfig,
+) -> dict:
+    """Contrastive fine-tune of the pooling head. This is the stage that works.
+
+    A positive pair is the same player's two match-parity halves: two disjoint
+    samples of one player, from different matches. Negatives are the other
+    players in the batch. Every player with enough touches on both sides yields
+    a pair, so there are thousands -- which is the whole contrast with the
+    projection problem, where the entire open corpus contains a few hundred
+    cross-domain pairs. Same data, same players, opposite supply of supervision.
+
+    Only the pooling head trains; the language model stays frozen.
+    """
+    eligible = [
+        pid
+        for pid, halves in sorted(states.items())
+        if len(halves) == 2
+        and all(r.kept for r in halves.values())
+        and touches(halves) >= config.min_touches
+    ]
+    if len(eligible) < 32:
+        return {"pairs": len(eligible), "trained": False}
+
+    tensors = {
+        pid: [
+            torch.from_numpy(states[pid][parity].stack().astype(np.float32)).to(device)
+            for parity in sorted(states[pid])
+        ]
+        for pid in eligible
+    }
+
+    optimiser = torch.optim.AdamW(head.parameters(), lr=config.learning_rate)
+    rng = np.random.default_rng(config.seed)
+    head.train()
+    history = []
+
+    for epoch in range(config.contrastive_epochs):
+        order = rng.permutation(len(eligible))
+        total, batches = 0.0, 0
+        for start in range(0, len(order), config.contrastive_batch):
+            chunk = order[start : start + config.contrastive_batch]
+            if len(chunk) < 8:  # InfoNCE needs negatives to be meaningful
+                continue
+            anchors = torch.stack([head(tensors[eligible[i]][0], None) for i in chunk])
+            positives = torch.stack([head(tensors[eligible[i]][1], None) for i in chunk])
+            value = info_nce(anchors, positives, config.temperature)
+            optimiser.zero_grad(set_to_none=True)
+            value.backward()
+            optimiser.step()
+            total += float(value.detach())
+            batches += 1
+        if batches:
+            history.append(total / batches)
+            print(
+                f"  contrastive epoch {epoch + 1}/{config.contrastive_epochs}: "
+                f"loss {history[-1]:.4f}",
+                flush=True,
+            )
+
+    head.eval()
+    return {
+        "pairs": len(eligible),
+        "trained": True,
+        "first_loss": history[0] if history else None,
+        "last_loss": history[-1] if history else None,
+    }
+
+
+@torch.no_grad()
+def retrieval_eval(
+    states: dict[int, dict[int, _Reservoir]],
+    head: PoolingHead,
+    device: torch.device,
+    min_touches: int = MIN_TOUCHES,
+    limit: int = 1500,
+) -> dict:
+    """Held-out same-player retrieval: does half A find half B?
+
+    The honest test of whether these embeddings describe a player rather than a
+    match. Each player's two parity halves are pooled separately; a query is one
+    half, and the target is the same player's other half among all the others.
+    Chance is 1/n, so recall@1 is directly interpretable.
+    """
+    eligible = [
+        pid
+        for pid, halves in sorted(states.items())
+        if len(halves) == 2
+        and all(r.kept for r in halves.values())
+        and touches(halves) >= min_touches
+    ][:limit]
+    if len(eligible) < 16:
+        return {"players": len(eligible), "evaluated": False}
+
+    head.eval()
+    left, right = [], []
+    for pid in eligible:
+        halves = [states[pid][p].stack().astype(np.float32) for p in sorted(states[pid])]
+        left.append(head(torch.from_numpy(halves[0]).to(device), None))
+        right.append(head(torch.from_numpy(halves[1]).to(device), None))
+    a = torch.stack(left)
+    b = torch.stack(right)
+
+    scores = a @ b.T
+    ranks = (scores > scores.diag().unsqueeze(1)).sum(dim=1) + 1
+    ranks = ranks.float()
+    return {
+        "players": len(eligible),
+        "evaluated": True,
+        "recall_at_1": float((ranks <= 1).float().mean()),
+        "recall_at_10": float((ranks <= 10).float().mean()),
+        "mean_rank": float(ranks.mean()),
+        "chance_recall_at_1": 1.0 / len(eligible),
+    }
 
 
 def contrastive_pairs(
@@ -230,13 +428,23 @@ def build_index(
         raise SystemExit(f"no token shards in {tokens_dir}. Run `scout build` first.")
 
     model = load_checkpoint(checkpoint, device)
-    print(f"collecting hidden states over {len(shards)} shards")
-    states = collect_player_states(model, shards, device, config.batch_size)
-    print(f"players with any touches: {len(states):,}")
+    print(f"collecting hidden states over {len(shards)} shards", flush=True)
+    states = collect_player_states(model, shards, device, config.batch_size, seed=config.seed)
+    print(f"players with any touches: {len(states):,}", flush=True)
 
     head = PoolingHead(model.config.d_model, config.dim).to(device)
+
+    before = retrieval_eval(states, head, device, config.min_touches)
+    print(f"retrieval before contrastive training: {before}", flush=True)
+
+    stats = train_pooling_head(states, head, device, config)
+    print(f"contrastive: {stats}", flush=True)
+
+    after = retrieval_eval(states, head, device, config.min_touches)
+    print(f"retrieval after contrastive training:  {after}", flush=True)
+
     embeddings, ids = pool_all(states, head, device, config.min_touches)
-    print(f"players clearing {config.min_touches} touches: {len(ids):,}")
+    print(f"players clearing {config.min_touches} touches: {len(ids):,}", flush=True)
 
     rows = crosswalk.build()
     by_player: dict[int, list] = defaultdict(list)
@@ -268,8 +476,15 @@ def build_index(
         "checkpoint": str(checkpoint),
         "dim": config.dim,
         "min_touches": config.min_touches,
+        "max_positions_per_player": MAX_POSITIONS_PER_PLAYER,
         "players": len(ids),
-        "shards": [p.name for p in shards],
+        "shards": len(shards),
+        # Recorded so the index carries its own evidence: how well a player's
+        # embedding from one set of matches finds the same player's embedding
+        # from a disjoint set. Without this the index is unfalsifiable.
+        "retrieval_before_contrastive": before,
+        "retrieval_after_contrastive": after,
+        "contrastive": stats,
     }
     write_index(Path(out_dir), embeddings, pd.DataFrame(records), meta)
     print(f"wrote index for {len(ids):,} players to {out_dir}")

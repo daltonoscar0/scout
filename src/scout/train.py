@@ -190,6 +190,13 @@ def train(
     torch.manual_seed(config.seed)
 
     data = load_corpus(tokens_dir, config.max_events)
+    corpus_note = (
+        f"Pre-training used a {int(data.lengths.sum()):,}-token sample of the corpus, "
+        f"drawn uniformly across every competition-season "
+        f"(cap: {config.max_events:,} events)."
+        if config.max_events
+        else f"Pre-training used the whole corpus: {int(data.lengths.sum()):,} tokens."
+    )
     train_set, held_set = split_by_match(data, config.held_out_fraction, config.seed)
     print(
         f"sequences: {len(train_set):,} train / {len(held_set):,} held out "
@@ -254,7 +261,9 @@ def train(
             best = metrics["action_perplexity"]
             save_checkpoint(best_path, model, config, metrics, baseline, epoch)
 
-    write_model_card(out_dir, model, config, best, baseline, (time.time() - started) / 60)
+    write_model_card(
+        out_dir, model, config, best, baseline, (time.time() - started) / 60, corpus_note
+    )
     print(f"\nbest held-out action perplexity {best:.2f} vs bigram {baseline:.2f}", flush=True)
     if best >= baseline:
         print(
@@ -295,6 +304,7 @@ def write_model_card(
     best: float,
     baseline: float,
     minutes: float,
+    corpus_note: str = "full corpus",
 ) -> None:
     verdict = (
         f"beats the bigram baseline by {baseline / best:.2f}x"
@@ -323,6 +333,12 @@ grad clip {config.grad_clip}. Held-out split is {config.held_out_fraction:.0%} o
 *matches*, never of rows -- sequences from one match share possessions and
 opponents, so a row split leaks.
 Wall clock: {minutes:.1f} minutes.
+
+## Corpus
+{corpus_note}
+
+Player embeddings are computed over the **entire** corpus regardless of this
+cap; it constrains only what the language model saw during pre-training.
 
 ## Result
 held-out action perplexity {best:.2f}, bigram baseline {baseline:.2f}: {verdict}.
