@@ -37,7 +37,7 @@ rather than a crash.
 uv sync                             # query path only: CLI, app, export
 uv run scout demo                   # runs offline from the bundled index
 
-uv sync --extra train --extra models   # everything, for a rebuild
+uv sync --extra build --extra train --extra models   # everything, for a rebuild
 uv run scout build-index            # fetch, tokenize, train, embed; resumable
 
 uv run scout similar "Bernardo Silva" --k 10
@@ -57,8 +57,14 @@ resumes rather than starting over.
 | install | contains | used by |
 | --- | --- | --- |
 | `uv sync` | numpy, pandas, streamlit, openpyxl | everything on the query path |
+| `--extra build` | sportio | `scout fetch`, `scout build` |
 | `--extra train` | torch | `scout train`, `scout embed` |
 | `--extra models` | scikit-learn | `scout fit-value` |
+
+`sportio` is an editable path dependency on a sibling checkout, so it is kept
+out of the base install: otherwise `uv sync` in a clone anywhere else fails
+before anything can run, which is exactly what broke `scout demo` on a genuine
+fresh clone the first time it was tried.
 
 The query path never imports torch. Importing it costs 2-4 seconds cold, which
 would consume most of the spec's sub-5-second budget before any work happened,

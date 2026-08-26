@@ -14,8 +14,14 @@ requires-python = ">=3.11"
 # KMP_DUPLICATE_LIB_OK turns the clean abort into a segfault).
 #
 # Training and model fitting live in extras, and run as separate processes.
+#
+# sportio is deliberately NOT a base dependency. It is an editable path
+# dependency on a sibling checkout, so `uv sync` in a clone anywhere else fails
+# with "Distribution not found" before anything can run -- which broke the
+# spec's own acceptance criterion, "fresh clone + scout demo works offline".
+# Only the corpus rebuild needs it; the query path touches it solely to print a
+# version string, and does so defensively.
 dependencies = [
-    "sportio",
     "numpy>=1.26",
     "pandas>=2.2",
     "pyarrow>=16",
@@ -29,6 +35,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# `scout build` / `scout fetch` only: normalising raw StatsBomb JSON into the
+# canonical schema. Everything downstream reads the token shards instead.
+build = ["sportio"]
 # `scout train` / `scout embed` only. Never imported by the query path.
 train = ["torch>=2.4"]
 # `scout fit-value` only. Never imported in the same process as torch.

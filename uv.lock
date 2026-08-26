@@ -1827,12 +1827,14 @@ dependencies = [
     { name = "pyyaml" },
     { name = "rapidfuzz" },
     { name = "requests" },
-    { name = "sportio" },
     { name = "streamlit" },
     { name = "tqdm" },
 ]
 
 [package.optional-dependencies]
+build = [
+    { name = "sportio" },
+]
 models = [
     { name = "scikit-learn" },
 ]
@@ -1857,12 +1859,12 @@ requires-dist = [
     { name = "rapidfuzz", specifier = ">=3.9" },
     { name = "requests", specifier = ">=2.32" },
     { name = "scikit-learn", marker = "extra == 'models'", specifier = ">=1.5" },
-    { name = "sportio", editable = "../sportio" },
+    { name = "sportio", marker = "extra == 'build'", editable = "../sportio" },
     { name = "streamlit", specifier = ">=1.38" },
     { name = "torch", marker = "extra == 'train'", specifier = ">=2.4" },
     { name = "tqdm", specifier = ">=4.66" },
 ]
-provides-extras = ["train", "models"]
+provides-extras = ["build", "train", "models"]
 
 [package.metadata.requires-dev]
 dev = [
