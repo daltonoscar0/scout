@@ -35,9 +35,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# `scout build` / `scout fetch` only: normalising raw StatsBomb JSON into the
-# canonical schema. Everything downstream reads the token shards instead.
-build = ["sportio"]
 # `scout train` / `scout embed` only. Never imported by the query path.
 train = ["torch>=2.4"]
 # `scout fit-value` only. Never imported in the same process as torch.
@@ -57,11 +54,16 @@ scout = "scout.cli:main"
 [dependency-groups]
 dev = ["pytest>=8.3", "ruff>=0.6"]
 
-[tool.uv.sources]
-# Tracked live against the sibling working tree during development. sportio is
-# under active development in a separate session, so scout confines every
-# import of it to src/scout/sportio_adapter.py -- see that module's docstring.
-sportio = { path = "../sportio", editable = true }
+# NOTE: sportio is deliberately absent from [project.dependencies], from every
+# extra, and from [tool.uv.sources]. It is an editable checkout of a sibling
+# repo, and uv resolves a path source even when the package sits in an extra --
+# so merely declaring it makes `uv sync` fail in any clone that does not happen
+# to have ../sportio beside it. That broke "fresh clone + scout demo works
+# offline", which is the spec's hardest acceptance criterion.
+#
+# Install it explicitly when rebuilding the corpus:
+#     uv pip install -e ../sportio
+# Nothing on the query path needs it.
 
 [build-system]
 requires = ["hatchling"]
