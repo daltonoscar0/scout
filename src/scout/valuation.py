@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from scout import caveats
+
 # Competition tiers, coarse and deliberately explicit. Used to decide whether a
 # player's following season was a step up, sideways, or down. Lower is better.
 # Tiering leagues is inherently arguable -- this ordering is a defensible default
@@ -67,7 +69,10 @@ COMPETITION_TIER = {
 }
 DEFAULT_TIER = 3
 
-TARGET = "next_season_minutes_at_tier"
+# One definition, shared with the CLI, the app and the Excel export. Two
+# independent spellings of the same target string is how the caveats drifted
+# the first time.
+TARGET = caveats.VALUATION_TARGET
 
 FEATURE_COLUMNS = (
     "minutes",

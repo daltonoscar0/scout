@@ -277,3 +277,21 @@ def test_the_valuation_column_header_carries_the_unit():
     # as a transfer fee. The header has to say what the number is.
     assert "not money" in caveats.VALUATION_COLUMN.lower()
     assert "minutes" in caveats.VALUATION_COLUMN.lower()
+
+
+def test_the_measured_population_numbers_are_not_transposed():
+    # The app once read "275 men's and 211 women's". The measurement in
+    # reports/projection_power.md is female 275, male 211. Transposing them in
+    # user-facing text is the kind of error that survives review because both
+    # numbers are present and both are right.
+    from scout import app
+
+    note = app.projection_note()
+    assert "275 women's" in note and "211 men's" in note
+    assert "275 female" in caveats.PROJECTION_CAVEAT and "211 male" in caveats.PROJECTION_CAVEAT
+
+
+def test_the_valuation_target_has_one_spelling():
+    from scout import valuation
+
+    assert valuation.TARGET is caveats.VALUATION_TARGET

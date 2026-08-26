@@ -311,7 +311,7 @@ def projection_note() -> str:
     return (
         "**This projection is the identity: it is the player's own output, not a "
         "translation.** The open corpus cannot support a learned cross-competition "
-        "projection. Only 275 men's and 211 women's players have a genuine "
+        "projection. Only 275 women's and 211 men's players have a genuine "
         "club-to-international move with adequate minutes on both sides, and no "
         "predictor -- a fitted per-league offset or a low-rank map from the "
         "embedding -- beats the identity outside its bootstrap confidence interval. "
