@@ -80,8 +80,12 @@ that says BLOCKED is blocked by the data, not by effort.
   Config S is 6,553,947 parameters and config M is 14,549,339, both under the
   spec's 20M cap. At batch 96: 2,734 ms/step, 35 sequences/s. That is 13.3
   min/epoch over the full 7.1M-event corpus, so 30 epochs is about 6.6 hours.
-  Still to do: one run with `PYTORCH_ENABLE_MPS_FALLBACK=0` to prove no operator
-  silently falls back to CPU, which would be a ~10x regression.
+
+- **DONE -- no silent MPS fallback.** 30 full forward/backward/step iterations
+  run with `PYTORCH_ENABLE_MPS_FALLBACK=0` without raising, and every parameter
+  stays on the MPS device. A single operator falling back to CPU would be a ~10x
+  regression that is invisible by default, so this is worth rechecking after any
+  change to the model's operator set.
 
 - **Measure the 2+-competition population exactly.** The figures above come from
   a partial sample. A full pass over all 3,961 lineup files costs ~20 MB gzipped
