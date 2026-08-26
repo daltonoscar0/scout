@@ -20,21 +20,23 @@ that says BLOCKED is blocked by the data, not by effort.
 
 ## Known-degraded against the spec
 
-- **Projection head is expected to be statistically hollow, and will ship as a
-  reported null result.** The spec asks to predict competition-B output from a
-  competition-A embedding for players appearing in 2+ open competitions. Measured
-  over 32% of the corpus: inside the 360-era universe only **33 players** have a
-  genuine club-to-international domain shift with >=270 minutes on each side.
-  Cross-league pairs are worse -- 7 to 22 players per league pair. That is not a
-  training set. What ships is three baselines (identity, a same-league
-  aging/difficulty offset, and a rank-constrained club-to-international map) with
-  bootstrap confidence intervals, plus `reports/projection_power.md` stating the
-  n and whether anything beats identity outside its CI. If nothing does, the
-  README and the app both say so next to every projected number.
+- **MEASURED -- the projection head is statistically hollow and ships as a
+  reported null result.** Full-corpus measurement (all 3,961 lineups, not a
+  sample) in `reports/projection_power.md`, reproducible with `scout projection`.
+  11,794 players and 21,405 player-seasons yield 4,079 players in 2+
+  competition-seasons on squad membership, but only 935 once 270 minutes are
+  required on both sides. Of the surviving pairs, 1,792 of 3,697 are two editions
+  of the same competition -- an aging model, not a domain map. The genuine
+  club-to-international population is **486 players, which cannot be pooled**:
+  essentially nobody appears in both men's and women's competitions, so the real
+  strata are **275 female and 211 male**, both under the 300 needed to identify
+  even a heavily constrained map against a 65,000-parameter target.
+  Cross-league is worse: the largest league pairing in the whole corpus is La
+  Liga to Ligue 1 at 65 players, most are single digits.
   **This does not affect similarity.** Contrastive positives come from splitting
   one player's own season by match parity, which yields thousands of pairs. The
-  gap between "thousands" and "33" is the single most important fact about what
-  this data can and cannot support.
+  gap between "thousands" and "211" -- same players, same data -- is the single
+  most important fact about what this corpus can and cannot support.
 
 - **Valuation's default target is not money.** It is `next_season_minutes_at_tier`
   -- minutes played the following season at the same-or-higher competition tier,

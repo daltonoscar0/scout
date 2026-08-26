@@ -101,6 +101,27 @@ def cmd_players(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_projection(args: argparse.Namespace) -> int:
+    from scout import crosswalk, population
+
+    rows = crosswalk.build()
+    if crosswalk.build.missing_lineups:
+        print(
+            f"warning: {crosswalk.build.missing_lineups:,} matches have no cached lineup, "
+            "so these counts are a lower bound",
+            file=sys.stderr,
+        )
+    result = population.analyse(rows)
+    text = population.report(result)
+    Path("reports").mkdir(parents=True, exist_ok=True)
+    Path("reports/projection_power.md").write_text(text)
+    print(text)
+    ok, _ = population.verdict(result)
+    # Non-zero when the data cannot support the module, so this is usable as a
+    # gate rather than something a reader has to interpret.
+    return 0 if ok else 1
+
+
 def cmd_build(args: argparse.Namespace) -> int:
     from scout import corpus, tokenizer
 
@@ -145,6 +166,11 @@ def main(argv: list[str] | None = None) -> int:
 
     players = sub.add_parser("players", help="player/minutes index and its coverage")
     players.set_defaults(func=cmd_players)
+
+    projection = sub.add_parser(
+        "projection", help="measure whether the corpus can support a projection head"
+    )
+    projection.set_defaults(func=cmd_projection)
 
     build = sub.add_parser("build", help="tokenize cached events into the corpus")
     build.add_argument("--competition", help="restrict to competitions matching this substring")

@@ -46,19 +46,37 @@ Two findings shape what ships, and both are stated up front rather than buried:
 own season by match parity, which yields thousands of training pairs across the
 roughly 3,000 players clearing the minutes floor.
 
-**Cross-competition projection almost certainly does not.** The spec asks to
-project a player from competition A into competition B using players who appear
-in both. Measured across 32% of the corpus, only **33 players** inside the
-360-era universe have a genuine club-to-international move with at least 270
-minutes on each side, and cross-league pairs run 7 to 22 players. A 256-to-256
-linear map has 65,000 parameters; there is nothing like enough supervision to fit
-one. The projection module therefore ships as three baselines with bootstrap
-confidence intervals and an honest verdict in `reports/projection_power.md`. If
-the learned map does not beat identity outside its confidence interval, this
-README will say so, and so will the app, next to every projected number.
+**Cross-competition projection does not.** The spec asks to project a player
+from competition A into competition B, trained on players appearing in both.
+Measured over **every lineup in the corpus** -- 3,961 matches, 11,794 players,
+21,405 player-seasons, not a sample:
 
-That contrast -- thousands of pairs for similarity, 33 for projection -- is the
-most important thing to understand about open football data.
+| minutes floor, each side | players in 2+ competition-seasons |
+| --- | ---: |
+| any (squad membership) | 4,079 |
+| >= 270 min | 935 |
+| >= 900 min | 211 |
+
+Squad membership collapses by 77% once real minutes are required on both sides.
+And most of what survives is not a domain shift: at the 270-minute floor, 1,792
+of 3,697 pairs are two editions of the *same* competition, which teaches "four
+years older", not "how this player translates".
+
+What is left is **486 players with a genuine club-to-international move** -- and
+those cannot be pooled, because essentially no player appears in both men's and
+women's competitions. Per gender the usable counts are **275 female and 211
+male**. A 256-to-256 linear map has 65,000 parameters. Cross-*league* projection
+is worse still: the largest single league pairing in the entire open corpus is
+La Liga to Ligue 1 at 65 players, and most pairings are in single digits.
+
+So the projection module ships as a **reported null result**: identity as the
+baseline, bootstrap confidence intervals, and the verdict stated in
+`reports/projection_power.md`, in this README, and next to every projected number
+in the app. It is not hidden behind a plausible-looking number.
+
+That contrast -- thousands of training pairs for similarity, 211 for projection,
+from the same players in the same data -- is the most important thing to
+understand about open football data.
 
 **Valuation does not predict money by default.** See `TODO.md`; Transfermarkt's
 terms prohibit exactly this use, so the default target is next-season minutes at
