@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from scout import app, metrics, similarity, valuation
+from scout import app, corpus, metrics, similarity, valuation
 
 N_PLAYERS = 30
 
@@ -229,6 +231,34 @@ def test_a_player_with_no_following_season_has_no_reading():
     assert app.value_reading(app.value_table(frame), 5) is None
 
 
+def test_the_value_table_reproduces_the_valuation_modules_target():
+    # app.value_table trades build_dataset's per-player loop for a shift, because
+    # the loop costs ~10s on a full corpus. The two must not drift apart.
+    frame = make_metrics()
+    dataset = valuation.build_dataset(frame)
+    reference = pd.DataFrame(
+        {
+            "player_id": dataset.player_ids,
+            "season": dataset.seasons,
+            "minutes_at_tier": dataset.target,
+        }
+    ).sort_values(["player_id", "season"], ignore_index=True)
+    ours = app.value_table(frame).sort_values(["player_id", "season"], ignore_index=True)
+    pd.testing.assert_frame_equal(ours, reference, check_dtype=False)
+
+
+def test_a_drop_in_tier_scores_zero_rather_than_the_minutes_played():
+    frame = pd.DataFrame(
+        {
+            "player_id": [1, 1],
+            "competition": ["Premier League", "Major League Soccer"],
+            "season": ["2023", "2024"],
+            "minutes": [2000.0, 2500.0],
+        }
+    )
+    assert app.value_table(frame)["minutes_at_tier"].tolist() == [0.0]
+
+
 def test_the_value_table_is_empty_when_no_season_has_a_successor():
     single = make_metrics()
     single = single[single["season"] == "2024"]
@@ -283,3 +313,73 @@ def test_a_missing_index_produces_an_actionable_message_not_a_traceback(tmp_path
     message = app.index_missing_message(excinfo.value)
     assert "scout embed" in message
     assert "scout demo" in message
+
+
+# --- latency --------------------------------------------------------------
+
+
+def test_a_whole_card_builds_well_inside_the_latency_budget():
+    """The spec's budget is 5 seconds per query on CPU.
+
+    At corpus scale a card is ~0.2s, so the 2s assertion here is a tripwire for
+    an accidental per-player Python loop -- the first draft of `value_table`
+    reused `valuation.build_dataset` and took 9 seconds on exactly this input.
+    """
+    index = make_index(n=6_300, dim=256)
+    frame = make_metrics(n=6_300)
+
+    start = time.perf_counter()
+    app.radar_frame(index, frame, 4_242)
+    app.comps_frame(index, 4_242, k=10)
+    app.projection_frame(frame, 4_242, "UEFA Euro")
+    app.value_reading(app.value_table(frame), 4_242)
+    index.resolve("Player 4242")
+    assert time.perf_counter() - start < 2.0
+
+
+# --- the whole page, under a real Streamlit runtime ------------------------
+#
+# AppTest executes the script the way the server does, so these cover the layer
+# the pure functions cannot: that the widgets wire together, that a caveat is
+# actually emitted next to its number, and that a fresh clone gets a message
+# rather than a stack trace.
+
+
+def _run_app(timeout: float = 60.0):
+    from streamlit.testing.v1 import AppTest
+
+    return AppTest.from_file(str(Path(app.__file__).resolve()), default_timeout=timeout).run()
+
+
+def test_a_fresh_clone_with_no_index_gets_told_what_to_run(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    at = _run_app(timeout=30.0)
+    assert not at.exception
+    assert any("scout embed" in error.value for error in at.error)
+
+
+def test_the_card_renders_and_carries_both_caveats(tmp_path, monkeypatch):
+    index_dir = tmp_path / similarity.INDEX_DIR
+    metrics_dir = tmp_path / corpus.METRICS_DIR
+    index_dir.mkdir(parents=True)
+    metrics_dir.mkdir(parents=True)
+    index = make_index()
+    np.save(index_dir / similarity.EMBEDDINGS_FILE, index.embeddings)
+    index.players.to_parquet(index_dir / similarity.PLAYERS_FILE)
+    make_metrics().to_parquet(metrics_dir / "1_1.parquet", index=False)
+    monkeypatch.chdir(tmp_path)
+
+    at = _run_app()
+    at.text_input[0].input("Player 14").run()
+
+    assert not at.exception
+    assert [s.value for s in at.subheader] == ["Player 14"]
+    # A crowded name space must produce a pick-list, not a silent choice.
+    assert len(at.radio) == 1
+    # Both caveats are rendered as their own blocks beside the numbers they
+    # qualify, which is the requirement -- a footnote would satisfy neither.
+    warnings = " ".join(w.value for w in at.warning)
+    assert "275" in warnings and "211" in warnings
+    assert "not money" in warnings
+    # Comparables and projection tables.
+    assert len(at.dataframe) == 2

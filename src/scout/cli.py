@@ -581,7 +581,13 @@ def cmd_demo(args: argparse.Namespace) -> int:
     for rank, match in enumerate(index.similar(int(sample["player_id"]), k=8), 1):
         print(f"  {rank:>2}. {match.score:.3f}  {match.name[:34]:<34} {match.competition[:22]}")
     print()
-    print(f"  {PROJECTION_CAVEAT}")
+    # Only similarity is demonstrated here, so only similarity is caveated. The
+    # projection and valuation warnings belong beside their own numbers --
+    # attaching them to output that contains neither trains the reader to skip
+    # them exactly where they matter.
+    print("  Similarity is the part of scout this data supports well.")
+    print("  For the projection and valuation caveats, see `scout project` and")
+    print("  `scout value`, or reports/projection_power.md.")
     return 0
 
 

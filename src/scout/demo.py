@@ -54,12 +54,16 @@ class BundleMissing(similarity.IndexMissing):
     """
 
 
-def _bundle_files(out_dir: Path) -> tuple[Path, Path, Path, Path]:
+def _bundle_files(out_dir: Path) -> tuple[Path, ...]:
     out_dir = Path(out_dir)
     return (
         out_dir / similarity.EMBEDDINGS_FILE,
         out_dir / similarity.PLAYERS_FILE,
         out_dir / METRICS_FILE,
+        # The index metadata carries the vocabulary fingerprint and player count.
+        # Omitting it here would let a bundle missing that file read as complete,
+        # and PlayerIndex.load would then silently return meta={}.
+        out_dir / similarity.META_FILE,
         out_dir / MANIFEST_FILE,
     )
 
@@ -134,19 +138,30 @@ def build_bundle(
 
     ids = set(kept["player_id"].astype(int))
     if metrics is not None and not metrics.empty and "player_id" in metrics:
-        rows = metrics[metrics["player_id"].astype(int).isin(ids)].reset_index(drop=True)
+        # to_numeric rather than astype(int): player_id can arrive as a pandas
+        # nullable Int64 carrying pd.NA, and astype raises on that rather than
+        # dropping the unusable rows.
+        numeric = pd.to_numeric(metrics["player_id"], errors="coerce")
+        rows = metrics[numeric.notna() & numeric.isin(ids)].reset_index(drop=True)
     else:
         rows = pd.DataFrame(columns=list(metrics.columns) if metrics is not None else [])
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    embeddings_path, players_path, metrics_path, manifest_path = _bundle_files(out_dir)
+    embeddings_path, players_path, metrics_path, meta_path, manifest_path = _bundle_files(out_dir)
+
+    # Remove the old manifest before touching any data file. A rebuild that
+    # fails its size check would otherwise leave new data beside a stale
+    # manifest, and bundle_exists() would keep reporting a complete bundle that
+    # describes something no longer on disk.
+    manifest_path.unlink(missing_ok=True)
+
     np.save(embeddings_path, bundle.embeddings)
     bundle.players.to_parquet(players_path, index=False)
     rows.to_parquet(metrics_path, index=False)
-    (out_dir / similarity.META_FILE).write_text(json.dumps(meta, indent=2))
+    meta_path.write_text(json.dumps(meta, indent=2))
 
-    written = [embeddings_path, players_path, metrics_path, out_dir / similarity.META_FILE]
+    written = [embeddings_path, players_path, metrics_path, meta_path]
     size = sum(path.stat().st_size for path in written)
     if size > MAX_BUNDLE_BYTES:
         raise ValueError(
@@ -185,7 +200,7 @@ def load_bundle(out_dir: Path = DEMO_DIR) -> tuple[similarity.PlayerIndex, pd.Da
     """
     out_dir = Path(out_dir)
     _require(out_dir)
-    _, _, metrics_path, _ = _bundle_files(out_dir)
+    _, _, metrics_path, _, _ = _bundle_files(out_dir)
     return similarity.PlayerIndex.load(out_dir), pd.read_parquet(metrics_path)
 
 

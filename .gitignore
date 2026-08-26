@@ -14,7 +14,9 @@ models/
 # and is deliberately never redistributed from this repo. See docs/licensing.md.
 data/transfermarkt/
 
-# The demo bundle is produced by `scout demo`, not tracked.
-data/demo/
+# The demo bundle IS committed, deliberately. The spec's acceptance criterion is
+# "fresh clone + `scout demo` works offline", and everything else under data/ is
+# ignored, so if the bundle were ignored too a fresh clone would have nothing to
+# run and the criterion would be unsatisfiable. It is a few hundred KB.
 *.xlsx
 !tests/fixtures/*.xlsx

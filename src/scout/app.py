@@ -400,23 +400,55 @@ class ValueReading:
     peers: int
 
 
+VALUE_COLUMNS = ("player_id", "season", "minutes_at_tier")
+
+
 def value_table(frame: pd.DataFrame) -> pd.DataFrame:
     """Observed next-season-minutes-at-tier for every player-season with a label.
 
-    Built from `valuation.build_dataset`, which is pandas-only. The fitted model
-    lives behind the `models` extra and importing sklearn here would put it on
-    the query path, so the gauge shows what actually happened rather than what a
-    model predicts. That is also the more honest number.
+    The gauge shows what actually happened rather than what a model predicts.
+    That is partly honesty and partly architecture: the fitted valuation model
+    needs sklearn, and importing sklearn would put it on the query path.
+
+    The target definition -- next season's minutes, zeroed if the player dropped
+    a tier, and no label at all for a player's final season -- is
+    `valuation.build_dataset`'s, and this reproduces it with a shift instead of
+    a Python loop over players. That loop costs ~10s on a 6,300-player corpus
+    because it materialises a dict per row, which alone would double the app's
+    latency budget; here it is ~30ms. `tier_of` and `season_sort_key` are still
+    imported rather than restated, so the rule has one home.
     """
-    dataset = valuation.build_dataset(frame)
-    if len(dataset) == 0:
-        return pd.DataFrame(columns=["player_id", "season", "minutes_at_tier"])
+    needed = ["player_id", "competition", "season", "minutes"]
+    if frame.empty or not set(needed) <= set(frame.columns):
+        return pd.DataFrame(columns=list(VALUE_COLUMNS))
+
+    work = frame[needed].copy()
+    work["tier"] = work["competition"].map(valuation.tier_of)
+    # A stable sort so two competitions inside one season keep a deterministic
+    # order; which of them counts as "next" is arbitrary either way, but it must
+    # not change between reruns of the same page.
+    work = work.sort_values(
+        ["player_id", "season"],
+        key=lambda column: (
+            column.map(valuation.season_sort_key) if column.name == "season" else column
+        ),
+        kind="stable",
+    )
+
+    following = work.groupby("player_id")[["tier", "minutes"]].shift(-1)
+    # A player's last season in the corpus has no successor and so no label.
+    # Dropping it is deliberate: "we do not know" is not "they played nowhere".
+    labelled = following["minutes"].notna()
+    dropped_tier = following["tier"] > work["tier"]
+    minutes = following["minutes"].where(~dropped_tier, 0.0)
+
     return pd.DataFrame(
         {
-            "player_id": dataset.player_ids,
-            "season": dataset.seasons,
-            "minutes_at_tier": dataset.target,
-        }
+            "player_id": work.loc[labelled, "player_id"].astype(int).to_numpy(),
+            "season": work.loc[labelled, "season"].astype(str).to_numpy(),
+            "minutes_at_tier": minutes[labelled].astype(float).to_numpy(),
+        },
+        columns=list(VALUE_COLUMNS),
     )
 
 
@@ -585,7 +617,10 @@ def render_card(
         if radar.empty:
             st.info("No metrics for this player, so no percentile profile.")
         else:
-            st.altair_chart(radar_chart(radar), use_container_width=True)
+            # No `use_container_width`/`width` argument anywhere in this module:
+            # Streamlit removed the former and only added the latter in 1.49,
+            # and the declared floor is 1.38. Defaults render on both.
+            st.altair_chart(radar_chart(radar))
             peers = int(radar["peers"].iloc[0])
             st.caption(
                 f"Percentile against {peers:,} players with at least "
@@ -602,7 +637,7 @@ def render_card(
                 "Unknown is not zero."
             )
         else:
-            st.altair_chart(gauge_chart(reading.percentile), use_container_width=True)
+            st.altair_chart(gauge_chart(reading.percentile))
             st.metric(
                 f"{valuation.TARGET} after {reading.season}",
                 f"{reading.minutes_at_tier:,.0f} min",
@@ -621,7 +656,6 @@ def render_card(
         st.dataframe(
             comps.style.format({"similarity": "{:.3f}", "minutes": "{:,.0f}"}),
             hide_index=True,
-            use_container_width=True,
         )
 
     st.markdown("#### Projection")
@@ -643,7 +677,6 @@ def render_card(
                 }
             ),
             hide_index=True,
-            use_container_width=True,
         )
         st.caption(
             "The two league means are context, not an adjustment. Applying them is "
