@@ -3,9 +3,13 @@
 Player similarity, projection and valuation from open football event data.
 
 Type a player's name, get their nearest comparables, a projection of their output
-in a target competition, and a model-implied value against a market baseline.
-Ships as a CLI, a Streamlit scout card, and an Excel export, with a prebuilt
-index so queries run without retraining.
+in a target competition, and a model-implied value. Ships as a CLI, a Streamlit
+scout card, and an Excel export, with a prebuilt index so queries run without
+retraining.
+
+Two of those three come with a measured caveat attached, stated below and
+repeated wherever the number appears: the open corpus cannot support a learned
+cross-competition projection, and "value" here is not money.
 
 ## How it works
 
@@ -17,9 +21,15 @@ are near neighbours in that space.
 The token is factorized into five fields rather than fused into one symbol, and
 that choice is load-bearing. A fused (action, zone, delta, flags, dt) space is on
 the order of 10^8 symbols; the softmax alone would be tens of billions of
-parameters. Five small embedding tables summed before the first block total 347
-rows and about 89k parameters at `d_model=256`. Run `python -m scout.vocab` to
-print the table.
+parameters. Five small embedding tables summed before the first block total 354
+rows and about 91k parameters at `d_model=256`. Run `python -m scout.vocab` to
+print the table and its fingerprint.
+
+The vocabulary is a contract: every checkpoint, embedding and token shard records
+the fingerprint it was built under, and loading one against a different
+vocabulary is an error rather than a warning. Embeddings from two vocabularies
+are not comparable, and the symptom would be plausible-looking wrong neighbours
+rather than a crash.
 
 ## Quickstart
 
