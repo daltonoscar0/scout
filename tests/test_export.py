@@ -14,7 +14,7 @@ import datetime as dt
 import pytest
 from openpyxl import load_workbook
 
-from scout import export
+from scout import caveats, export
 
 
 def make_row(name="Player One", **overrides):
@@ -143,7 +143,7 @@ def test_the_header_row_reads_as_expected(tmp_path):
     assert header[-5:] == [
         "Projection",
         "Projection caveat",
-        "Implied value",
+        caveats.VALUATION_COLUMN,
         "Value source",
         "Note",
     ]
@@ -164,7 +164,7 @@ def test_the_values_round_trip(tmp_path):
     assert row["Similarity 1"] == pytest.approx(0.9412)
     assert row["Comparable 2"] == "Player Three"
     assert row["Projection"] == pytest.approx(0.55)
-    assert row["Implied value"] == pytest.approx(2100.4)
+    assert row[caveats.VALUATION_COLUMN] == pytest.approx(2100.4)
     assert row["Value source"] == export.VALUATION_TARGET
     assert row["Note"] == "left-footed"
 
@@ -176,7 +176,7 @@ def test_the_number_formats_are_what_a_reader_needs(tmp_path):
     cells = dict(zip(header, sheet[2], strict=True))
 
     assert cells["Minutes"].number_format == export.COUNT_FORMAT
-    assert cells["Implied value"].number_format == export.COUNT_FORMAT
+    assert cells[caveats.VALUATION_COLUMN].number_format == export.COUNT_FORMAT
     assert cells["xg_per90"].number_format == export.RATE_FORMAT
     assert cells["Projection"].number_format == export.RATE_FORMAT
     assert cells["Similarity 1"].number_format == export.SCORE_FORMAT

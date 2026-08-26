@@ -19,20 +19,7 @@ import sys
 from pathlib import Path
 
 from scout import __version__
-
-# Stated once, used by the CLI, the app and the Excel export, so the three cannot
-# drift. The measurement behind it is in reports/projection_power.md.
-PROJECTION_CAVEAT = (
-    "Projection is the identity baseline. Measured over the full open corpus, "
-    "only 275 female and 211 male players have a genuine club-to-international "
-    "move with adequate minutes on both sides -- too few to fit a cross-domain "
-    "map. See reports/projection_power.md."
-)
-
-VALUE_CAVEAT = (
-    "Value is next-season minutes at the same or a better competition tier, "
-    "computed from StatsBomb lineups. It is a scarcity proxy, not money."
-)
+from scout.caveats import PROJECTION_CAVEAT, VALUATION_CAVEAT
 
 
 def _spine(path: str = "data/raw/spine.json") -> list[dict]:
@@ -502,7 +489,7 @@ def cmd_value(args: argparse.Namespace) -> int:
     merged = merged.sort_values("residual", ascending=False).head(args.top)
 
     print(f"target: {valuation.TARGET}")
-    print(f"  {VALUE_CAVEAT}")
+    print(f"  {VALUATION_CAVEAT}")
     print()
     print(f"  {'player_id':>9}  {'residual':>9}  {'predicted':>9}  {'actual':>8}  competition")
     for _, row in merged.iterrows():
@@ -529,13 +516,18 @@ def cmd_export(args: argparse.Namespace) -> int:
         return 2
 
     frame = corpus.load_metrics()
-    rows = export.build_rows(index, frame, names, k=args.k, projection_caveat=PROJECTION_CAVEAT)
-    provenance = {
-        "scout": __version__,
-        "projection_caveat": PROJECTION_CAVEAT,
-        "value_caveat": VALUE_CAVEAT,
-        "index": index.meta,
-    }
+    valuations = None
+    valuation_path = Path("data/derived/valuation.parquet")
+    if valuation_path.exists():
+        import pandas as pd
+
+        valuations = pd.read_parquet(valuation_path)
+
+    rows = export.build_rows(index, frame, names, k=args.k, valuations=valuations)
+    # build_provenance fills the scout version, the sportio version and the
+    # vocabulary fingerprint itself. Hand-rolling this dict produced a sheet
+    # reading "unknown" for exactly the three fields it exists to record.
+    provenance = export.build_provenance(index.meta, extra={"shortlist_file": str(args.shortlist)})
     path = export.write_workbook(args.xlsx, rows, provenance=provenance)
     print(f"wrote {path} ({len(rows)} players)")
     return 0

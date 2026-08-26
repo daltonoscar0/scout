@@ -30,25 +30,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from scout import caveats
+
 SHORTLIST_SHEET = "Shortlist"
 PROVENANCE_SHEET = "Provenance"
 
-# The caveat that follows every projected number out of this repo. Kept as one
-# string so the column, the cell comment and the provenance sheet cannot drift.
-PROJECTION_CAVEAT = (
-    "Identity projection: the player's source-competition output, unchanged. "
-    "No fitted predictor beat this null outside its bootstrap confidence "
-    "interval, so scout does not claim a learned cross-competition translation. "
-    "Treat this as 'what they did', not 'what they will do'."
-)
-
-VALUATION_TARGET = "next_season_minutes_at_tier"
-VALUATION_LICENCE = (
-    "Derived from StatsBomb open lineups only. Not a transfer fee. Transfermarkt "
-    "market value is not used: its terms prohibit automated access and prohibit "
-    "training models on the content, and all of its competitions are men's "
-    "football while much of this corpus is not."
-)
+# Caveat text lives in scout.caveats so the column, the cell comment, the
+# provenance sheet, the CLI and the app cannot drift apart. They already did
+# once.
+PROJECTION_CAVEAT = caveats.PROJECTION_CAVEAT
+VALUATION_TARGET = caveats.VALUATION_TARGET
+VALUATION_LICENCE = caveats.VALUATION_LICENCE
 
 # Number formats. Rates get two decimals as the spec asks; cosine similarity
 # gets three, because neighbour scores for a real player cluster inside a band
@@ -178,6 +170,95 @@ def _shortlist_entry(entry: Any, path: Path, position: int) -> dict:
 # --- provenance -----------------------------------------------------------
 
 
+def build_rows(
+    index: Any,
+    metrics: Any,
+    entries: list[dict],
+    *,
+    k: int = 10,
+    projection_caveat: str = caveats.PROJECTION_CAVEAT,
+    valuations: Any = None,
+) -> list[ShortlistRow]:
+    """Turn shortlist entries into rows, resolving each name against the index.
+
+    A name that resolves to nobody still produces a row, carrying the reason in
+    its note. A shortlist is typed by a human before the index is consulted, and
+    silently dropping the names that did not match would leave the reader
+    believing the workbook covers their whole list.
+
+    Names are never guessed between close candidates, for the same reason
+    `scout similar` refuses to: a confidently wrong player is worse than a gap.
+    """
+    import pandas as pd
+
+    rows: list[ShortlistRow] = []
+    for entry in entries:
+        name = str(entry.get("name", "")).strip()
+        note = str(entry.get("note", "") or "")
+        if not name:
+            continue
+
+        hits = index.resolve(name)
+        if not hits:
+            rows.append(ShortlistRow(name=name, note=_join(note, "no match in the index")))
+            continue
+        if len(hits) > 1 and not (hits[0][2] >= 95 and hits[0][2] - hits[1][2] >= 10):
+            others = ", ".join(display for _, display, _ in hits[:3])
+            rows.append(ShortlistRow(name=name, note=_join(note, f"ambiguous: {others}")))
+            continue
+
+        player_id = int(hits[0][0])
+        record = index.players[index.players["player_id"] == player_id]
+        record = record.iloc[0] if len(record) else None
+
+        player_metrics: dict[str, float] = {}
+        projection = None
+        if metrics is not None and len(metrics) and "player_id" in metrics:
+            numeric = pd.to_numeric(metrics["player_id"], errors="coerce")
+            mine = metrics[numeric == player_id]
+            if len(mine):
+                # The season with the most minutes is the most representative
+                # sample of how a player plays, not necessarily the most recent.
+                best = mine.sort_values("minutes").iloc[-1]
+                player_metrics = {
+                    column: float(best[column])
+                    for column in mine.columns
+                    if column.endswith("_per90") and pd.notna(best[column])
+                }
+                projection = player_metrics.get("xg_xa_per90")
+
+        valuation = None
+        if valuations is not None and len(valuations):
+            match = valuations[valuations["player_id"] == player_id]
+            if len(match):
+                valuation = float(match.iloc[0]["predicted"])
+
+        rows.append(
+            ShortlistRow(
+                name=str(record["name"]) if record is not None else name,
+                player_id=player_id,
+                competition=_as_text(record["competition"]) if record is not None else "",
+                season=_as_text(record["season"]) if record is not None else "",
+                position=_as_text(record["position"]) if record is not None else "",
+                minutes=float(record["minutes"]) if record is not None else None,
+                metrics=player_metrics,
+                comparables=[
+                    Comparable(name=match.name, score=match.score)
+                    for match in index.similar(player_id, k=k)
+                ],
+                projection=projection,
+                projection_caveat=projection_caveat,
+                valuation=valuation,
+                note=note,
+            )
+        )
+    return rows
+
+
+def _join(note: str, extra: str) -> str:
+    return f"{note}; {extra}" if note else extra
+
+
 def build_provenance(
     index_meta: dict | None = None,
     *,
@@ -262,7 +343,23 @@ def _provenance_rows(provenance: dict) -> list[tuple[str, str]]:
 
 
 def _as_text(value: Any) -> str:
-    return "" if value is None else str(value)
+    """Coerce anything to a cell-safe string, with missing values as blanks.
+
+    `str(pd.NA)` is the literal "<NA>" and `str(float("nan"))` is "nan"; both
+    would be written into the sheet as if they were the player's actual name.
+    Identity is checked before truthiness because `bool(pd.NA)` raises.
+    """
+    if value is None:
+        return ""
+    try:
+        if value is not value.__class__ and value != value:  # NaN is not equal to itself
+            return ""
+    except (TypeError, ValueError):
+        # pd.NA's __eq__ returns NA, and bool(NA) raises. That is itself the
+        # signal that the value is missing.
+        return ""
+    text = str(value)
+    return "" if text in ("<NA>", "nan", "NaT", "None") else text
 
 
 # --- the sheet layout -----------------------------------------------------
@@ -315,7 +412,11 @@ def _columns(rows: list[ShortlistRow]) -> tuple[list[_Column], list[str], int]:
     columns += [
         _Column("Projection", RATE_FORMAT),
         _Column("Projection caveat"),
-        _Column("Implied value", COUNT_FORMAT),
+        # The header carries the unit and the disclaimer, because a column
+        # headed "Implied value" formatted with a thousands separator reads as
+        # a transfer fee, and a screenshot of the column is often all anyone
+        # sees. The licence note on the provenance sheet does not survive that.
+        _Column(caveats.VALUATION_COLUMN, COUNT_FORMAT),
         _Column("Value source"),
         _Column("Note"),
     ]
@@ -323,12 +424,18 @@ def _columns(rows: list[ShortlistRow]) -> tuple[list[_Column], list[str], int]:
 
 
 def _row_values(row: ShortlistRow, metric_names: list[str], n_comparables: int) -> list[Any]:
+    # Every text field goes through _as_text and every number through _number.
+    # A shortlist row can be assembled straight from a pandas frame, so any of
+    # these can arrive as pd.NA -- and `row.position or ""` on a pd.NA raises
+    # "boolean value of NA is ambiguous", aborting the whole export halfway
+    # through writing it. A float NaN is worse: it slips through and writes a
+    # numeric blank into a text column.
     values: list[Any] = [
-        row.name,
-        row.player_id,
-        row.competition,
-        row.season,
-        row.position or "",
+        _as_text(row.name),
+        _number(row.player_id),
+        _as_text(row.competition),
+        _as_text(row.season),
+        _as_text(row.position),
         _number(row.minutes),
     ]
     values += [_number(row.metrics.get(name)) for name in metric_names]
