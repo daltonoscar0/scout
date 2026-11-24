@@ -1,5 +1,7 @@
 # scout
 
+[![tests](https://github.com/daltonoscar0/scout/actions/workflows/tests.yml/badge.svg)](https://github.com/daltonoscar0/scout/actions/workflows/tests.yml)
+
 Player similarity, projection and valuation from open football event data.
 
 Type a player's name, get their nearest comparables, a projection of their output
@@ -252,3 +254,7 @@ Everything shipped here is derived from StatsBomb open data. Nothing under
 | `reports/projection_baselines.md` | the three-way comparison, scored out of sample |
 | `reports/valuation.md` | the fit, and whether residuals persist between windows |
 | `models/MODEL_CARD.md` | the LM's architecture, training and honest result |
+
+## License
+
+MIT. See [LICENSE](LICENSE).
