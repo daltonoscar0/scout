@@ -1,0 +1,36 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      # --locked installs exactly what uv.lock pins rather than re-resolving.
+      # --extra models pulls scikit-learn, which tests/test_valuation.py needs.
+      # The `train` extra (torch) is deliberately left out: nothing on the
+      # tested path imports it, and it would add a large download.
+      #
+      # sportio is NOT installed. It is deliberately absent from this
+      # project's dependencies (see the note in pyproject.toml) so that a
+      # fresh clone works offline, and no test needs it.
+      - name: Install
+        run: uv sync --locked --extra models
+
+      # Uses the demo/fixture data committed in the repo. Verified locally:
+      # 276 passed, 2 skipped.
+      - name: Run tests
+        run: uv run pytest -m "not network"
